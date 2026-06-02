@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { ReactNode, RefObject } from "react";
 import { useAgentSocket } from "./useAgentSocket";
 import { useAttention } from "./useAttention";
+import { Markdown } from "./Markdown";
 import type { Run, Settings, Step, SubgoalCard, TimelineItem } from "./types";
 import {
   ArrowUp, Chevron, Doc, Eye, Globe, Plus, Robot, Search, Sliders, Spark, Stop,
@@ -293,7 +294,8 @@ function RunView({ run, onApprove }: {
             </div>
           )}
           {run.status === "finished" && run.result &&
-            <div className="result ok"><div className="result-label">Result</div>{run.result}</div>}
+            <div className="result ok"><div className="result-label">Result</div>
+              <Markdown content={run.result} /></div>}
           {run.status === "error" &&
             <div className="result err"><div className="result-label">Error</div>{run.error}</div>}
           {run.status === "cancelled" &&
@@ -391,7 +393,7 @@ function TimelineItemView({ item }: { item: TimelineItem }) {
       return (
         <div className="block">
           <ActorTag actor="system" />
-          <div className="present">{item.markdown}</div>
+          <div className="present"><Markdown content={item.markdown} /></div>
         </div>
       );
     case "note":

@@ -280,6 +280,21 @@ body {
   line-height: 1.55; white-space: pre-wrap; word-break: break-word; }
 .step-n-cont { background: none; color: var(--accent); }
 
+/* rendered markdown (final result / present shortlist) */
+.md { white-space: normal; line-height: 1.55; word-break: break-word; }
+.md > :first-child { margin-top: 0; }
+.md > :last-child { margin-bottom: 0; }
+.md h2, .md h3, .md h4, .md h5, .md h6 { margin: 14px 0 6px; line-height: 1.3; font-weight: 650; }
+.md h2 { font-size: 17px; }
+.md h3 { font-size: 15px; }
+.md h4, .md h5, .md h6 { font-size: 14px; }
+.md p { margin: 8px 0; }
+.md ul, .md ol { margin: 6px 0; padding-left: 22px; }
+.md li { margin: 3px 0; }
+.md hr { border: none; border-top: 1px solid var(--line); margin: 12px 0; }
+.md code { font-family: var(--mono); font-size: 12.5px; background: #f3eee6; padding: 1px 5px; border-radius: 5px; }
+.md strong { font-weight: 650; }
+
 /* transient progress bar — the next real message replaces it */
 .progress { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
 .progress-bar { flex: 1; height: 3px; border-radius: 3px; background: #ece6dd; overflow: hidden; position: relative; }
