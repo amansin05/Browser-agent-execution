@@ -70,19 +70,14 @@ INDEX_ACTION_TOOLS = [
     {"type": "function", "function": {
         "name": "navigate",
         "description": ("Navigate directly to a URL. PREFER this to reach a known page (a category "
-                        "or search-results URL) instead of clicking through menus."),
+                        "or search-results URL) instead of clicking through menus; also use it to go "
+                        "back by navigating to the previous URL."),
         "parameters": {"type": "object", "properties": {"url": {"type": "string"}},
                        "required": ["url"]}}},
-    {"type": "function", "function": {
-        "name": "press_key",
-        "description": "Press a single key on the focused element (e.g. Enter, Escape, PageDown).",
-        "parameters": {"type": "object", "properties": {"key": {"type": "string"}},
-                       "required": ["key"]}}},
-    {"type": "function", "function": {
-        "name": "go_back",
-        "description": "Go back to the previous page.",
-        "parameters": {"type": "object", "properties": {}, "required": []}}},
 ]
+# Deliberately small (5 page actions + 3 synthetic controls): a tight, high-frequency set so the
+# reasoner picks reliably and emits fewer malformed tool calls. Dropped press_key (input_text's
+# submit=Enter covers it) and go_back (navigate to the previous URL covers it).
 INDEX_ACTION_NAMES = {t["function"]["name"] for t in INDEX_ACTION_TOOLS}
 
 # An ask_user tool the FLAT agent can call to pop the MCQ modal when the request is ambiguous

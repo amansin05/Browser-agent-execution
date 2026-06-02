@@ -71,7 +71,7 @@ def test_render_numbers_interactive_elements_with_scroll_hint():
     assert "[0] <input type=search>" in out and "Search products" in out
     assert "[1] <button> \"Search\"" in out
     assert "[2] <a> \"Cart\" -> /cart" in out
-    assert "scroll down for more" in out  # 3000px page, 900px viewport, at top
+    assert "below" in out and "more content loads" in out  # scroll hint: 3000px page, 900px viewport
 
 
 def test_render_marks_new_elements_with_star():
@@ -96,7 +96,7 @@ def test_offscreen_elements_flagged():
     off = {"i": 0, "tag": "button", "name": "Load more", "text": "", "role": "", "type": "",
            "href": "", "inViewport": False}
     out = di._parse_dom_state(_dom_value([off])).render()
-    assert "off-screen" in out
+    assert "below the fold" in out
 
 
 def test_render_shows_input_value():

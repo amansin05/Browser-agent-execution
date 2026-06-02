@@ -34,7 +34,10 @@ log = get_logger(__name__)
 
 # Cap how much we pull back so a giant page can't blow the reasoner's context or the MCP result
 # size. ~250 interactive elements is far more than any sane page exposes above the fold.
-MAX_ELEMENTS = 250
+# Capture as much of the page as is useful so the reasoner rarely needs to scroll — the walk covers
+# the WHOLE rendered body (not just the viewport), and this caps how many interactive elements we
+# return on a very long page.
+MAX_ELEMENTS = 400
 MAX_TEXT = 120  # per-element visible-text cap
 
 # The buildDomTree script. A trimmed, page.evaluate-compatible port of nanobrowser's
@@ -224,7 +227,8 @@ class DomElement:
         label = (label or "").strip()
         href = f" -> {self.href}" if self.href else ""
         value = f' ="{self.value}"' if self.value else ""  # show what's already in the field
-        offscreen = "" if self.in_viewport else " (off-screen — scroll to reach)"
+        # Below the fold but STILL actionable by index (click/type auto-scrolls it into view).
+        offscreen = "" if self.in_viewport else " (below the fold)"
         quoted = f' "{label}"' if label else ""
         return f"[{self.index}] <{self.tag}{attrs}>{quoted}{value}{href}{offscreen}"
 
@@ -254,7 +258,8 @@ class DomState:
         if above > 20:
             parts.append(f"~{above}px above")
         if below > 20:
-            parts.append(f"~{below}px below (scroll down for more)")
+            # All of these elements are already listed below — scrolling only loads NEW (lazy) content.
+            parts.append(f"~{below}px below (only scroll if more content loads on scroll)")
         return ", ".join(parts) or "at top"
 
     def render(self, previous_keys: set | None = None) -> str:
@@ -271,9 +276,10 @@ class DomState:
         for e in self.elements:
             star = "*" if e.key() not in prev else " "
             lines.append(f"{star}{e.render()}")
-        return (head + "\n\nInteractive elements — act on these by their [index] "
-                "(click_element / input_text / select_option). `*` marks elements new since the "
-                "last step:\n" + "\n".join(lines))
+        return (head + "\n\nInteractive elements across the WHOLE page — act on any by its [index] "
+                "(click_element / input_text / select_option); clicking auto-scrolls it into view, "
+                "so you needn't scroll to reach one. `*` marks elements new since the last step:\n"
+                + "\n".join(lines))
 
 
 def _parse_dom_state(value) -> DomState | None:
@@ -400,7 +406,7 @@ async def scroll_page(session, direction: str = "down", amount: int | None = Non
 # return is {"ok": bool, "outcome": str} and nothing raises — the orchestrator turns `outcome` into
 # the recent-actions line the reasoner reads next turn.
 INTERACTION_ACTIONS = {"click_element", "input_text", "select_option", "scroll_page"}
-MCP_ACTIONS = {"navigate", "go_back", "press_key"}
+MCP_ACTIONS = {"navigate"}
 REASONER_ACTION_NAMES = INTERACTION_ACTIONS | MCP_ACTIONS
 
 # The page-change guard for multi-action turns (browser-use's "terminates_sequence"): only these
@@ -452,10 +458,6 @@ async def execute_action(session, action: str, args: dict) -> dict:
             return _inpage_outcome(await scroll_page(session, str(args.get("direction", "down")), args.get("amount")))
         if action == "navigate":
             return _mcp_outcome(await session.call_tool("browser_navigate", {"url": args.get("url", "")}))
-        if action == "go_back":
-            return _mcp_outcome(await session.call_tool("browser_navigate_back", {}))
-        if action == "press_key":
-            return _mcp_outcome(await session.call_tool("browser_press_key", {"key": args.get("key", "Enter")}))
         return {"ok": False, "outcome": f"unknown action {action!r}"}
     except Exception as e:  # noqa: BLE001 — a bad action must surface as feedback, not crash the run
         return {"ok": False, "outcome": f"{action} raised: {e!r}"}
