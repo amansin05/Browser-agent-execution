@@ -122,7 +122,7 @@ class AgentSession:
 
     async def run_task(self, task: str, *, agent="two-tier", allow=None, max_steps=12,
                        max_replans=3, read_content=True, ground=True, approve=None, ask=None,
-                       emit=None, trace=True) -> str | None:
+                       emit=None, trace=True, parallel=False) -> str | None:
         """Run one task against the persistent browser. Memory (if attached) seeds the planner
         and is updated with the task/result + any observations afterward. When `trace` is set, every
         emit event is also appended to a per-run JSONL trace file under the log dir (set trace=False
@@ -231,7 +231,8 @@ class AgentSession:
                         self.groq, self.session, self.reasoner_tools, self.capabilities, task,
                         allowlist=allowlist, approve=approve_w, ask=ask_w, max_steps=max_steps,
                         max_replans=max_replans, read_content=read_content, ground=ground, emit=emit,
-                        preamble=self._planner_preamble(task), observations=observations)
+                        preamble=self._planner_preamble(task), observations=observations,
+                        parallel=parallel, browser=self.browser)
             finally:
                 # Whole flow done — if we paused for a human at any point, land on the chat-UI tab
                 # (the one in front of the user before the run started) so the result is visible and

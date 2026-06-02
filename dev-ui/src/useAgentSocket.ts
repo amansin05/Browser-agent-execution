@@ -215,7 +215,8 @@ export function useAgentSocket() {
     const run: Run = { task, agent: s.agent, mode: "live", status: "running", items: [], approval: null, ask: null };
     dispatch({ kind: "newRun", run });
     send({ type: "start", task, agent: s.agent, allow: s.allow,
-           maxSteps: s.maxSteps, extract: s.extract, grounding: s.grounding, pickTab: s.pickTab });
+           maxSteps: s.maxSteps, extract: s.extract, grounding: s.grounding, pickTab: s.pickTab,
+           parallel: s.parallel });
   }, []);
 
   const respondApproval = useCallback((id: number, approved: boolean) => {

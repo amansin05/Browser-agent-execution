@@ -109,4 +109,5 @@ export interface Settings {
   extract: boolean;
   grounding: boolean;
   pickTab: boolean;
+  parallel: boolean;
 }

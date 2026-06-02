@@ -23,7 +23,7 @@ def npx_command() -> str:
     return "npx.cmd" if os.name == "nt" else "npx"
 
 
-def build_server_params(use_extension: bool, browser: str) -> StdioServerParameters:
+def build_server_params(use_extension: bool, browser: str, headless: bool = False) -> StdioServerParameters:
     # `-y` so npx never blocks on an interactive "Ok to proceed?" download prompt.
     args = ["-y", "@playwright/mcp@latest"]
     env = dict(os.environ)  # inherit PATH etc.
@@ -40,13 +40,18 @@ def build_server_params(use_extension: bool, browser: str) -> StdioServerParamet
         # Smoke mode: reuse the installed Chrome instead of downloading Chromium.
         args += ["--browser", browser]
 
+    if headless:
+        # Ephemeral parallel workers (agent/gather.py): run offscreen and ISOLATED (in-memory
+        # profile) so they never pop a window or clash with your live Chrome's profile lock.
+        args += ["--headless", "--isolated"]
+
     return StdioServerParameters(command=npx_command(), args=args, env=env)
 
 
 @asynccontextmanager
-async def open_session(use_extension: bool, browser: str):
+async def open_session(use_extension: bool, browser: str, headless: bool = False):
     """Spawn the Playwright MCP server and yield an initialized (session, params)."""
-    params = build_server_params(use_extension, browser)
+    params = build_server_params(use_extension, browser, headless=headless)
     async with stdio_client(params) as (read, write):
         async with ClientSession(read, write) as session:
             await session.initialize()

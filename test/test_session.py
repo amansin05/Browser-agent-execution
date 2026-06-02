@@ -57,6 +57,7 @@ def _bare_session():
     s = AgentSession.__new__(AgentSession)
     s.session = object()        # non-None so run_task proceeds
     s.use_extension = False
+    s.browser = "chrome"
     s.memory = None
     s.profile = None
     s.groq = None

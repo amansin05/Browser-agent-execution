@@ -9,6 +9,7 @@ import {
 
 const DEFAULT_SETTINGS: Settings = {
   agent: "two-tier", allow: "", maxSteps: 12, extract: true, grounding: true, pickTab: false,
+  parallel: true,
 };
 
 const QUICK_START = [
@@ -168,6 +169,8 @@ function Sidebar(props: {
                 onChange={(e) => set("grounding", e.target.checked)} /> Web grounding (search before planning)</label>
               <label className="check"><input type="checkbox" checked={settings.extract}
                 onChange={(e) => set("extract", e.target.checked)} /> Content extractor (opaque pages)</label>
+              <label className="check"><input type="checkbox" checked={settings.parallel}
+                onChange={(e) => set("parallel", e.target.checked)} /> Parallel multi-site search (headless)</label>
             </>
           )}
           <label className="field"><span>Max steps</span>

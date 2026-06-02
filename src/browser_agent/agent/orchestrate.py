@@ -10,6 +10,7 @@ import json
 
 from browser_agent.agent.dom_index import execute_action, index_dom, is_terminating
 from browser_agent.agent.extract import extract_candidates, synthesize_options
+from browser_agent.agent.gather import gather_parallel
 from browser_agent.agent.grounding import web_grounding
 from browser_agent.agent.planner import plan_subgoals
 from browser_agent.agent.reader import readable_text
@@ -316,7 +317,8 @@ async def run_subgoal(groq, session, reasoner_tools, subgoal, *, allowlist, appr
 
 async def orchestrate(groq, session, reasoner_tools, capabilities, goal, *, allowlist,
                       approve, ask, max_steps, max_replans, read_content, ground=True, emit=None,
-                      preamble="", observations=None, model=MODEL) -> str:
+                      preamble="", observations=None, model=MODEL,
+                      parallel=False, browser="chrome") -> str:
     """Plan the goal into subgoals, run each as a verified reasoner loop, re-plan on escalation.
     `preamble` (session memory) is fed to the planner; `observations` (if provided) accumulates
     cross-subgoal readouts so the caller can persist them to the scratchpad. When `ground` is set,
@@ -347,6 +349,33 @@ async def orchestrate(groq, session, reasoner_tools, capabilities, goal, *, allo
         sg_type = sg.get("type", "act")
         tier = sg.get("tier", "auto")
         log.info("subgoal %s (%s/%s): %s", sg["id"], sg_type, tier, sg["goal"])
+
+        # --- PARALLEL EXPLORE: dispatch a run of consecutive explore subgoals concurrently, each on
+        #     its own headless session, instead of one-at-a-time on the live browser (agent/gather).
+        #     gather_parallel emits its own per-source subgoal_start/candidates/subgoal_end, so we
+        #     skip the normal single-subgoal emit + loop below for these.
+        if parallel and sg_type == "explore":
+            run = [sg]
+            j = i + 1
+            while j < len(plan) and plan[j].get("type", "act") == "explore":
+                run.append(plan[j])
+                j += 1
+            if len(run) >= 2:
+                log.info("dispatching %d explore subgoals in parallel", len(run))
+                results = await gather_parallel(
+                    groq, reasoner_tools, run, allowlist=allowlist, max_steps=max_steps + 6,
+                    model=model, read_content=read_content, browser=browser, emit=emit)
+                for sg2 in run:
+                    cands = results.get(sg2.get("id"), [])
+                    if cands:
+                        state["candidates"].extend(cands)
+                        observations.append(
+                            f"gathered {len(cands)} candidates from source (parallel)")
+                log.info("parallel explore -> %d candidates total", len(state["candidates"]))
+                i = j
+                continue
+            # a lone explore -> fall through to the normal sequential path below
+
         emit({"type": "subgoal_start", "id": sg["id"], "goal": sg["goal"], "kind": sg_type,
               "tier": tier, "success_condition": sg["success_condition"],
               "needs_approval": sg["needs_approval"]})
