@@ -1,0 +1,359 @@
+"""Indexed-DOM perception — a numbered, addressable view of the page's interactive elements.
+
+This is the perception upgrade modelled on browser-use / nanobrowser. The Playwright-MCP
+accessibility snapshot (`browser_snapshot`) gives the reasoner an a11y *text* dump whose element
+refs (`e5`, `e12`) renumber every navigation and miss JS-rendered clickables — the root cause of
+the "clicked the wrong thing / looped on a menu / 0 candidates on a product grid" failures.
+
+Instead we inject a `buildDomTree` script via the MCP `browser_evaluate` tool (the same seam the
+content extractor uses — see agent/reader.evaluate_json). It walks the live DOM, finds the VISIBLE
+INTERACTIVE elements (native controls, ARIA roles, contenteditable, click handlers, and the
+cursor:pointer catch-all that surfaces framework widgets the a11y tree misses), assigns each a
+stable integer index, and stamps `data-ba-id="<index>"` on the element. The reasoner then acts by
+INDEX (`click_element(3)`), and we resolve that index back to the exact element via its data-ba-id —
+so a click never depends on a stale ref or a fragile CSS selector.
+
+The module has three parts:
+  1. `index_dom(session)`        -> DomState (the numbered element map + page meta), best-effort.
+  2. `DomState.render(...)`      -> the LLM-facing text, with NEW elements marked `*[i]`.
+  3. `click_element` / `input_text` / `select_option` / `scroll_page` — index-addressed actions
+     executed in-page, robust to reflows.
+
+Everything is best-effort: any failure returns None / {"ok": False, ...} and never raises, so the
+caller can fall back to the a11y snapshot rather than crash the run.
+"""
+
+import json
+from dataclasses import dataclass, field
+
+from browser_agent.agent.reader import evaluate_json
+from browser_agent.log import get_logger
+
+log = get_logger(__name__)
+
+# Cap how much we pull back so a giant page can't blow the reasoner's context or the MCP result
+# size. ~250 interactive elements is far more than any sane page exposes above the fold.
+MAX_ELEMENTS = 250
+MAX_TEXT = 120  # per-element visible-text cap
+
+# The buildDomTree script. A trimmed, page.evaluate-compatible port of nanobrowser's
+# public/buildDomTree.js: no highlight overlays (DOM-only mode), no getEventListeners (it's a
+# DevTools-only API, unavailable inside page.evaluate — we lean on the cursor:pointer + role +
+# event-attribute heuristics instead). Returns a flat list of interactive elements + page meta as a
+# plain object, so Playwright JSON-encodes it once and evaluate_json recovers it directly.
+_BUILD_DOM_JS = """
+() => {
+  const MAX_ELEMENTS = __MAX_ELEMENTS__, MAX_TEXT = __MAX_TEXT__;
+  const SKIP = new Set(['script','style','noscript','template','svg','path','head','meta','link']);
+  // Tags that ARE an interaction in themselves — we don't descend into them (their text is theirs).
+  const ATOMIC = new Set(['a','button','input','select','textarea','option','summary']);
+  const INTERACTIVE_TAGS = new Set(
+    ['a','button','input','select','textarea','summary','details','option','label']);
+  const INTERACTIVE_ROLES = new Set(
+    ['button','link','menuitem','menuitemcheckbox','menuitemradio','radio','checkbox','tab',
+     'switch','option','combobox','searchbox','textbox','slider','spinbutton','listbox','menu',
+     'menubar']);
+
+  const isDisabled = (el) =>
+    el.disabled === true || el.getAttribute('aria-disabled') === 'true' || el.hasAttribute('disabled');
+
+  const isVisible = (el) => {
+    let s; try { s = window.getComputedStyle(el); } catch (e) { return false; }
+    if (!s || s.visibility === 'hidden' || s.display === 'none' || parseFloat(s.opacity) === 0)
+      return false;
+    return el.offsetWidth > 0 || el.offsetHeight > 0 || el.getClientRects().length > 0;
+  };
+
+  const inViewport = (el) => {
+    const r = el.getBoundingClientRect();
+    if (r.width === 0 && r.height === 0) return false;
+    return r.bottom >= 0 && r.right >= 0 &&
+           r.top <= (window.innerHeight || 0) && r.left <= (window.innerWidth || 0);
+  };
+
+  const isInteractive = (el) => {
+    if (isDisabled(el)) return false;
+    const tag = el.tagName.toLowerCase();
+    if (INTERACTIVE_TAGS.has(tag)) return true;
+    const role = (el.getAttribute('role') || '').toLowerCase();
+    if (role && INTERACTIVE_ROLES.has(role)) return true;
+    if (el.isContentEditable || el.getAttribute('contenteditable') === 'true') return true;
+    if (el.hasAttribute('onclick') || typeof el.onclick === 'function') return true;
+    const ti = el.getAttribute('tabindex');
+    if (ti !== null && ti !== '-1') return true;
+    // The catch-all: a pointer cursor is how most framework-rendered clickables (div/span widgets)
+    // announce themselves. This is what the a11y tree misses on retail SPAs.
+    try { if (window.getComputedStyle(el).cursor === 'pointer') return true; } catch (e) {}
+    return false;
+  };
+
+  // Distinct from its already-interactive parent? (so a <div role=button> with nested clickable
+  // children still surfaces them, but inherited cursor:pointer alone does NOT duplicate the parent.)
+  const isDistinct = (el) => {
+    const tag = el.tagName.toLowerCase();
+    if (ATOMIC.has(tag)) return true;
+    const role = (el.getAttribute('role') || '').toLowerCase();
+    if (role && INTERACTIVE_ROLES.has(role)) return true;
+    if (el.isContentEditable || el.getAttribute('contenteditable') === 'true') return true;
+    if (el.hasAttribute('onclick') || typeof el.onclick === 'function') return true;
+    if (el.hasAttribute('data-testid') || el.hasAttribute('data-test')) return true;
+    return false;
+  };
+
+  const accName = (el) => {
+    const cands = [el.getAttribute('aria-label'), el.getAttribute('placeholder'),
+                   el.getAttribute('alt'), el.getAttribute('title'), el.getAttribute('name')];
+    if (typeof el.value === 'string') cands.push(el.value);
+    for (const c of cands) { if (c && String(c).trim()) return String(c).trim().slice(0, MAX_TEXT); }
+    return '';
+  };
+
+  const ownText = (el) =>
+    (el.innerText || el.textContent || '').replace(/\\s+/g, ' ').trim().slice(0, MAX_TEXT);
+
+  const elements = [];
+  let idx = 0;
+
+  const walk = (node, inInteractive) => {
+    if (idx >= MAX_ELEMENTS || !node || node.nodeType !== 1) return;
+    const tag = node.tagName.toLowerCase();
+    if (SKIP.has(tag) || node.id === 'playwright-highlight-container') return;
+
+    let mine = false;
+    let visible = false;
+    try { visible = isVisible(node); } catch (e) {}
+    if (visible && isInteractive(node) && (!inInteractive || isDistinct(node))) {
+      node.setAttribute('data-ba-id', String(idx));
+      let inv = false; try { inv = inViewport(node); } catch (e) {}
+      elements.push({
+        i: idx,
+        tag,
+        role: (node.getAttribute('role') || '').toLowerCase(),
+        type: (node.getAttribute('type') || '').toLowerCase(),
+        text: ownText(node),
+        name: accName(node),
+        href: tag === 'a' ? (node.getAttribute('href') || '') : '',
+        inViewport: inv,
+      });
+      idx++;
+      mine = true;
+      if (ATOMIC.has(tag)) return;  // don't descend into a button/link/input/select
+    }
+    const childInInteractive = inInteractive || mine;
+    if (node.shadowRoot) {
+      for (const c of node.shadowRoot.children) walk(c, childInInteractive);
+    }
+    for (const c of node.children) walk(c, childInInteractive);
+  };
+
+  // Clear ids from a previous pass so a reflowed page can't leave two elements claiming one index.
+  document.querySelectorAll('[data-ba-id]').forEach((e) => e.removeAttribute('data-ba-id'));
+  if (document.body) walk(document.body, false);
+
+  const docEl = document.documentElement;
+  return {
+    url: location.href,
+    title: document.title || '',
+    scrollY: Math.round(window.scrollY || 0),
+    scrollHeight: Math.round((docEl && docEl.scrollHeight) || 0),
+    innerHeight: Math.round(window.innerHeight || 0),
+    elements,
+  };
+}
+"""
+
+
+@dataclass
+class DomElement:
+    """One interactive element the reasoner can address by `index`."""
+    index: int
+    tag: str
+    role: str = ""
+    type: str = ""
+    text: str = ""
+    name: str = ""
+    href: str = ""
+    in_viewport: bool = True
+
+    def key(self) -> tuple:
+        """A reflow-stable identity (NOT the index, which shifts) for marking NEW elements across
+        steps. Two renders of the same logical control share a key even if their index moved."""
+        return (self.tag, self.role, self.type, self.name, self.href, self.text[:40])
+
+    def render(self) -> str:
+        """One LLM-facing line, e.g. `[3] <button> "Add to cart"` or `[1] <input type=search> "Search"`."""
+        attrs = f" type={self.type}" if self.type else ""
+        attrs += f" role={self.role}" if self.role and self.role not in self.tag else ""
+        label = self.name or self.text
+        # Prefer the accessible name; show the visible text too when it adds information.
+        if self.name and self.text and self.text != self.name:
+            label = f"{self.name} | {self.text}"
+        label = (label or "").strip()
+        href = f" -> {self.href}" if self.href else ""
+        offscreen = "" if self.in_viewport else " (off-screen — scroll to reach)"
+        quoted = f' "{label}"' if label else ""
+        return f"[{self.index}] <{self.tag}{attrs}>{quoted}{href}{offscreen}"
+
+
+@dataclass
+class DomState:
+    """The numbered interactive-element map + page meta for one observation."""
+    url: str = ""
+    title: str = ""
+    scroll_y: int = 0
+    scroll_height: int = 0
+    viewport_height: int = 0
+    elements: list[DomElement] = field(default_factory=list)
+    selector_map: dict[int, DomElement] = field(default_factory=dict)
+
+    @property
+    def keys(self) -> set:
+        """The reflow-stable keys of every element — what the NEXT step diffs against for NEW marks."""
+        return {e.key() for e in self.elements}
+
+    def _scroll_hint(self) -> str:
+        above = self.scroll_y
+        below = max(0, self.scroll_height - self.scroll_y - self.viewport_height)
+        if self.scroll_height <= self.viewport_height + 10:
+            return "whole page fits the viewport"
+        parts = []
+        if above > 20:
+            parts.append(f"~{above}px above")
+        if below > 20:
+            parts.append(f"~{below}px below (scroll down for more)")
+        return ", ".join(parts) or "at top"
+
+    def render(self, previous_keys: set | None = None) -> str:
+        """Render the page for the reasoner. Elements that appeared since `previous_keys` (the prior
+        step's keys) are marked `*[i]` so the model notices a dropdown/modal/grid that just opened —
+        the browser-use NEW-element cue."""
+        prev = previous_keys or set()
+        head = (f"[page] {self.url}" + (f' — "{self.title}"' if self.title else "") + "\n"
+                f"[scroll] {self._scroll_hint()}")
+        if not self.elements:
+            return head + "\n\n(no interactive elements detected — the page may be plain text, a "
+            "canvas, or still loading; read the extracted content or scroll/navigate)"
+        lines = []
+        for e in self.elements:
+            star = "*" if e.key() not in prev else " "
+            lines.append(f"{star}{e.render()}")
+        return (head + "\n\nInteractive elements — act on these by their [index] "
+                "(click_element / input_text / select_option). `*` marks elements new since the "
+                "last step:\n" + "\n".join(lines))
+
+
+def _parse_dom_state(value) -> DomState | None:
+    """Turn the decoded buildDomTree value into a DomState. None if it's not the shape we expect."""
+    if not isinstance(value, dict) or not isinstance(value.get("elements"), list):
+        return None
+    elements = []
+    for raw in value["elements"]:
+        if not isinstance(raw, dict) or "i" not in raw:
+            continue
+        elements.append(DomElement(
+            index=int(raw["i"]),
+            tag=str(raw.get("tag", "")),
+            role=str(raw.get("role", "")),
+            type=str(raw.get("type", "")),
+            text=str(raw.get("text", "")),
+            name=str(raw.get("name", "")),
+            href=str(raw.get("href", "")),
+            in_viewport=bool(raw.get("inViewport", True)),
+        ))
+    return DomState(
+        url=str(value.get("url", "")),
+        title=str(value.get("title", "")),
+        scroll_y=int(value.get("scrollY", 0) or 0),
+        scroll_height=int(value.get("scrollHeight", 0) or 0),
+        viewport_height=int(value.get("innerHeight", 0) or 0),
+        elements=elements,
+        selector_map={e.index: e for e in elements},
+    )
+
+
+async def index_dom(session) -> DomState | None:
+    """Build the indexed-DOM view of the current page via `browser_evaluate`. Best-effort: returns
+    None on any failure (the caller then falls back to the a11y snapshot)."""
+    js = _BUILD_DOM_JS.replace("__MAX_ELEMENTS__", str(MAX_ELEMENTS)).replace("__MAX_TEXT__", str(MAX_TEXT))
+    value = await evaluate_json(session, js)
+    state = _parse_dom_state(value)
+    if state is None:
+        log.debug("index_dom: buildDomTree returned an unexpected shape; falling back")
+        return None
+    log.debug("index_dom: %d interactive elements on %s", len(state.elements), state.url[:80])
+    return state
+
+
+# --------------------------------------------------------------------------- index-addressed actions
+# Each action resolves `index` -> the element stamped `data-ba-id="<index>"` and acts on it in-page.
+# This is what makes clicks robust: no stale snapshot ref, no guessed CSS selector. All return a
+# dict {"ok": bool, ...}; they never raise (evaluate_json swallows failures and returns None).
+
+def _by_id_prelude(index: int) -> str:
+    """JS that resolves the data-ba-id element into `el`, returning early if it's gone (the page
+    reflowed and the index is stale — the caller should re-observe)."""
+    return ("const el = document.querySelector('[data-ba-id=\"" + str(int(index)) + "\"]');\n"
+            "  if (!el) return {ok:false, reason:'element [' + " + str(int(index)) +
+            " + '] not found — the page changed; re-observe'};\n")
+
+
+async def _run_action(session, function: str) -> dict:
+    val = await evaluate_json(session, function)
+    if isinstance(val, dict):
+        return val
+    return {"ok": False, "reason": "action returned no result (eval failed)"}
+
+
+async def click_element(session, index: int) -> dict:
+    """Click the element addressed by `index`. Scrolls it into view first."""
+    fn = ("() => {\n  " + _by_id_prelude(index) +
+          "  el.scrollIntoView({block:'center', inline:'center'});\n"
+          "  const tag = el.tagName.toLowerCase();\n"
+          "  el.click();\n"
+          "  return {ok:true, tag, text:(el.innerText||el.value||'').slice(0,80)};\n}")
+    return await _run_action(session, fn)
+
+
+async def input_text(session, index: int, text: str) -> dict:
+    """Type `text` into the input/textarea/contenteditable addressed by `index`. Uses the native
+    value setter + input/change events so React/Vue controlled inputs register the change (a bare
+    `el.value = x` is silently ignored by those frameworks)."""
+    fn = ("() => {\n  " + _by_id_prelude(index) +
+          "  el.scrollIntoView({block:'center'});\n  el.focus();\n"
+          "  const val = " + json.dumps(text) + ";\n"
+          "  if (el.isContentEditable) { el.textContent = val; }\n"
+          "  else {\n"
+          "    const proto = el.tagName === 'TEXTAREA' ? window.HTMLTextAreaElement.prototype\n"
+          "                                            : window.HTMLInputElement.prototype;\n"
+          "    const d = Object.getOwnPropertyDescriptor(proto, 'value');\n"
+          "    if (d && d.set) { d.set.call(el, val); } else { el.value = val; }\n  }\n"
+          "  el.dispatchEvent(new Event('input', {bubbles:true}));\n"
+          "  el.dispatchEvent(new Event('change', {bubbles:true}));\n"
+          "  return {ok:true, tag:el.tagName.toLowerCase()};\n}")
+    return await _run_action(session, fn)
+
+
+async def select_option(session, index: int, value: str) -> dict:
+    """Pick an <option> (by value OR visible label) in the <select> addressed by `index`."""
+    fn = ("() => {\n  " + _by_id_prelude(index) +
+          "  const want = " + json.dumps(value) + ";\n"
+          "  let matched = false;\n"
+          "  for (const o of (el.options || [])) {\n"
+          "    if (o.value === want || (o.text || '').trim() === want) { o.selected = true; matched = true; break; }\n"
+          "  }\n"
+          "  el.dispatchEvent(new Event('change', {bubbles:true}));\n"
+          "  return {ok:matched, value:el.value, reason: matched ? undefined : 'no option matched ' + want};\n}")
+    return await _run_action(session, fn)
+
+
+async def scroll_page(session, direction: str = "down", amount: int | None = None) -> dict:
+    """Scroll the window down/up by `amount` px (defaults to ~one viewport). Used instead of a
+    snapshot-ref scroll so it works uniformly across pages."""
+    sign = "-" if str(direction).lower() == "up" else "+"
+    px = "Math.round(window.innerHeight * 0.85)" if amount is None else str(int(amount))
+    fn = ("() => {\n"
+          f"  const by = {sign}({px});\n"
+          "  window.scrollBy(0, by);\n"
+          "  return {ok:true, scrollY:Math.round(window.scrollY), "
+          "scrollHeight:Math.round(document.documentElement.scrollHeight)};\n}")
+    return await _run_action(session, fn)
