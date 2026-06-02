@@ -1,0 +1,22 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+
+# Secrets / env
+.env
+
+# Node / frontend
+dev-ui/node_modules/
+dev-ui/dist/
+
+# Runtime artifacts
+.browser_agent_memory/
+.playwright-mcp/
+snapshot.md
+scripts/pages/_upload_sample.txt
+*.gif

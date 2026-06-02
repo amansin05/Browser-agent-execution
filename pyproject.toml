@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "browser-agent"
+version = "1.0.0"
+description = "Autonomous browser agent — Groq Scout brain + Playwright MCP hands."
+requires-python = ">=3.12"
+dependencies = [
+    "groq>=1.0",
+    "mcp>=1.26",
+    "python-dotenv>=1.0",
+    "fastapi>=0.115",
+    "uvicorn>=0.30",
+    "websockets>=12",
+    # Fallback content extractor: when in-page Readability.js yields nothing, trafilatura strips
+    # boilerplate from the page's outerHTML into clean markdown (browser_agent/agent/reader.py).
+    "trafilatura>=1.8",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "pytest-asyncio>=0.24"]
+# Path A reference stack (the browser-use fallback in scripts/hello_world.py).
+path-a = ["browser-use>=0.12"]
+
+[project.scripts]
+browser-agent = "browser_agent.agent.main:main"          # two-tier planner/reasoner agent
+browser-agent-flat = "browser_agent.agent.flat:main"      # flat single-loop agent
+browser-agent-server = "browser_agent.server.app:main"    # FastAPI WebSocket backend
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+# Ship the vendored Readability.js (it's injected into the page at runtime, not imported).
+[tool.setuptools.package-data]
+"browser_agent.vendor.readability" = ["*.js", "*.md"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["test"]
+markers = ["live: exercises real Groq/browser (not run by default)"]
