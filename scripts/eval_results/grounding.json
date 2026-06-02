@@ -1,0 +1,456 @@
+{
+  "rate": "52/52",
+  "results": [
+    {
+      "layer": "js",
+      "name": "two real results",
+      "ok": true,
+      "got": [
+        "shop-a.com",
+        "shop-b.com"
+      ],
+      "notes": []
+    },
+    {
+      "layer": "js",
+      "name": "dedup same domain",
+      "ok": true,
+      "got": [
+        "shop.com"
+      ],
+      "notes": []
+    },
+    {
+      "layer": "js",
+      "name": "strip www",
+      "ok": true,
+      "got": [
+        "myntra.com"
+      ],
+      "notes": []
+    },
+    {
+      "layer": "js",
+      "name": "protocol-relative",
+      "ok": true,
+      "got": [
+        "flipkart.com"
+      ],
+      "notes": []
+    },
+    {
+      "layer": "js",
+      "name": "skip bare duckduckgo (no uddg)",
+      "ok": true,
+      "got": [
+        "realstore.com"
+      ],
+      "notes": []
+    },
+    {
+      "layer": "js",
+      "name": "decode uddg redirect",
+      "ok": true,
+      "got": [
+        "amazon.in"
+      ],
+      "notes": []
+    },
+    {
+      "layer": "js",
+      "name": "skip bing/microsoft",
+      "ok": true,
+      "got": [
+        "good.com"
+      ],
+      "notes": []
+    },
+    {
+      "layer": "js",
+      "name": "skip short link text",
+      "ok": true,
+      "got": [
+        "b.com"
+      ],
+      "notes": []
+    },
+    {
+      "layer": "js",
+      "name": "skip javascript: href",
+      "ok": true,
+      "got": [
+        "c.com"
+      ],
+      "notes": []
+    },
+    {
+      "layer": "js",
+      "name": "skip mailto:",
+      "ok": true,
+      "got": [
+        "d.com"
+      ],
+      "notes": []
+    },
+    {
+      "layer": "js",
+      "name": "skip # anchor",
+      "ok": true,
+      "got": [
+        "e.com"
+      ],
+      "notes": []
+    },
+    {
+      "layer": "js",
+      "name": "skip relative path",
+      "ok": true,
+      "got": [
+        "f.com"
+      ],
+      "notes": []
+    },
+    {
+      "layer": "js",
+      "name": "cap at N=8",
+      "ok": true,
+      "got": [
+        "s0.com",
+        "s1.com",
+        "s2.com",
+        "s3.com",
+        "s4.com",
+        "s5.com",
+        "s6.com",
+        "s7.com"
+      ],
+      "notes": []
+    },
+    {
+      "layer": "js",
+      "name": "order preserved",
+      "ok": true,
+      "got": [
+        "one.com",
+        "two.com",
+        "three.com"
+      ],
+      "notes": []
+    },
+    {
+      "layer": "js",
+      "name": "title trimmed to 140",
+      "ok": true,
+      "got": [
+        "long.com"
+      ],
+      "notes": []
+    },
+    {
+      "layer": "js",
+      "name": "whitespace collapsed",
+      "ok": true,
+      "got": [
+        "ws.com"
+      ],
+      "notes": []
+    },
+    {
+      "layer": "js",
+      "name": "junk plus good",
+      "ok": true,
+      "got": [
+        "gold.com"
+      ],
+      "notes": []
+    },
+    {
+      "layer": "js",
+      "name": "http allowed",
+      "ok": true,
+      "got": [
+        "oldsite.com"
+      ],
+      "notes": []
+    },
+    {
+      "layer": "js",
+      "name": "ddg link missing uddg -> skip",
+      "ok": true,
+      "got": [
+        "ok.com"
+      ],
+      "notes": []
+    },
+    {
+      "layer": "js",
+      "name": "skip google/gstatic",
+      "ok": true,
+      "got": [
+        "store.com"
+      ],
+      "notes": []
+    },
+    {
+      "layer": "js",
+      "name": "dedup www vs non-www",
+      "ok": true,
+      "got": [
+        "shop.com"
+      ],
+      "notes": []
+    },
+    {
+      "layer": "js",
+      "name": "empty anchors",
+      "ok": true,
+      "got": [],
+      "notes": []
+    },
+    {
+      "layer": "js",
+      "name": "all junk",
+      "ok": true,
+      "got": [],
+      "notes": []
+    },
+    {
+      "layer": "js",
+      "name": "subdomain kept",
+      "ok": true,
+      "got": [
+        "m.example.com"
+      ],
+      "notes": []
+    },
+    {
+      "layer": "js",
+      "name": "path/query ignored",
+      "ok": true,
+      "got": [
+        "q.com"
+      ],
+      "notes": []
+    },
+    {
+      "layer": "js",
+      "name": "uppercase host lowered",
+      "ok": true,
+      "got": [
+        "upper.com"
+      ],
+      "notes": []
+    },
+    {
+      "layer": "js",
+      "name": "skip yahoo",
+      "ok": true,
+      "got": [
+        "realy.com"
+      ],
+      "notes": []
+    },
+    {
+      "layer": "js",
+      "name": "skip w3/schema",
+      "ok": true,
+      "got": [
+        "realz.com"
+      ],
+      "notes": []
+    },
+    {
+      "layer": "js",
+      "name": "text exactly 8 chars passes",
+      "ok": true,
+      "got": [
+        "eight.com"
+      ],
+      "notes": []
+    },
+    {
+      "layer": "js",
+      "name": "many dedup to few",
+      "ok": true,
+      "got": [
+        "dup.com"
+      ],
+      "notes": []
+    },
+    {
+      "layer": "js",
+      "name": "two ddg redirects",
+      "ok": true,
+      "got": [
+        "ajio.com",
+        "nykaa.com"
+      ],
+      "notes": []
+    },
+    {
+      "layer": "js",
+      "name": "ddg redirect to skip-domain",
+      "ok": true,
+      "got": [
+        "realq.com"
+      ],
+      "notes": []
+    },
+    {
+      "layer": "js",
+      "name": "trim spaces in text",
+      "ok": true,
+      "got": [
+        "trim.com"
+      ],
+      "notes": []
+    },
+    {
+      "layer": "js",
+      "name": "host with port",
+      "ok": true,
+      "got": [
+        "hostport.com"
+      ],
+      "notes": []
+    },
+    {
+      "layer": "js",
+      "name": "skip data: href",
+      "ok": true,
+      "got": [
+        "datok.com"
+      ],
+      "notes": []
+    },
+    {
+      "layer": "js",
+      "name": "skip tel:",
+      "ok": true,
+      "got": [
+        "telok.com"
+      ],
+      "notes": []
+    },
+    {
+      "layer": "js",
+      "name": "relative redirect not protocol",
+      "ok": true,
+      "got": [
+        "safe.com"
+      ],
+      "notes": []
+    },
+    {
+      "layer": "js",
+      "name": "uppercase scheme",
+      "ok": true,
+      "got": [
+        "capscheme.com"
+      ],
+      "notes": []
+    },
+    {
+      "layer": "js",
+      "name": "dup titles diff domains kept",
+      "ok": true,
+      "got": [
+        "da.com",
+        "db.com"
+      ],
+      "notes": []
+    },
+    {
+      "layer": "js",
+      "name": "10 anchors 4 unique cap",
+      "ok": true,
+      "got": [
+        "u0.com",
+        "u1.com",
+        "u2.com",
+        "u3.com"
+      ],
+      "notes": []
+    },
+    {
+      "layer": "js",
+      "name": "real phone search results",
+      "ok": true,
+      "got": [
+        "amazon.in",
+        "flipkart.com",
+        "reliancedigital.in"
+      ],
+      "notes": []
+    },
+    {
+      "layer": "js",
+      "name": "utm params ignored",
+      "ok": true,
+      "got": [
+        "myntra.com"
+      ],
+      "notes": []
+    },
+    {
+      "layer": "py",
+      "name": "happy: builds block",
+      "ok": true,
+      "note": "### Web grounding (live search for 'buy jeans')\nTop results "
+    },
+    {
+      "layer": "py",
+      "name": "ddg blocked -> bing",
+      "ok": true,
+      "note": "navs=2"
+    },
+    {
+      "layer": "py",
+      "name": "both blocked -> empty",
+      "ok": true,
+      "note": "''"
+    },
+    {
+      "layer": "py",
+      "name": "empty results -> empty",
+      "ok": true,
+      "note": "''"
+    },
+    {
+      "layer": "py",
+      "name": "url in goal skipped",
+      "ok": true,
+      "note": "calls=0"
+    },
+    {
+      "layer": "py",
+      "name": "none session -> empty",
+      "ok": true,
+      "note": "''"
+    },
+    {
+      "layer": "py",
+      "name": "empty goal -> empty",
+      "ok": true,
+      "note": "''"
+    },
+    {
+      "layer": "py",
+      "name": "navigate error -> empty",
+      "ok": true,
+      "note": "''"
+    },
+    {
+      "layer": "py",
+      "name": "block formatting",
+      "ok": true,
+      "note": "1. Levi's Jeans - Myntra \u2014 myntra.com"
+    },
+    {
+      "layer": "py",
+      "name": "lists all returned domains",
+      "ok": true,
+      "note": "### Web grounding (live search for 'buy jeans')\nTop results "
+    }
+  ]
+}

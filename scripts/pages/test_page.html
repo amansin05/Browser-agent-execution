@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>MCP Test Page</title>
+</head>
+<body>
+  <h1 id="title">MCP Tool Test Page</h1>
+  <p id="para">The quick brown fox jumps over the lazy dog.</p>
+  <a id="link" href="test_page2.html">Go to page two</a>
+
+  <input id="textbox" type="text" value="" />
+  <input id="checkbox" type="checkbox" />
+  <select id="dropdown">
+    <option value="alpha">Alpha</option>
+    <option value="beta">Beta</option>
+    <option value="gamma">Gamma</option>
+  </select>
+  <input id="fileinput" type="file" />
+
+  <button id="changebtn" onclick="document.getElementById('clickresult').textContent='clicked'">Change Text</button>
+  <div id="clickresult">unclicked</div>
+
+  <button id="alertbtn" onclick="alert('hello dialog')">Open Alert</button>
+
+  <div id="hoverbox" onmouseover="document.getElementById('hoverresult').textContent='hovered'">Hover me</div>
+  <div id="hoverresult">unhovered</div>
+
+  <div id="dragsrc" draggable="true">Drag source</div>
+  <div id="dropzone"
+       ondragover="event.preventDefault()"
+       ondrop="event.preventDefault(); document.getElementById('dropresult').textContent='dropped'">Drop zone</div>
+  <div id="dropresult">nodrop</div>
+
+  <div id="delayed"></div>
+
+  <script>
+    console.log("MCP_TEST_CONSOLE_MARKER");
+    console.error("MCP_TEST_ERROR_MARKER");
+    setTimeout(function () {
+      document.getElementById('delayed').textContent = 'DELAYED_TEXT_APPEARED';
+    }, 1200);
+  </script>
+</body>
+</html>

@@ -1,0 +1,1704 @@
+{
+  "rate": "50/50",
+  "fail_counts": {},
+  "results": [
+    {
+      "i": 1,
+      "goal": "i need new jeans",
+      "kind": "shop",
+      "ok": true,
+      "failed": [],
+      "n": 5,
+      "types": [
+        "act",
+        "explore",
+        "explore",
+        "explore",
+        "present"
+      ],
+      "plan": [
+        {
+          "type": "act",
+          "goal": "Search for top jeans retailers in India",
+          "tier": "auto"
+        },
+        {
+          "type": "explore",
+          "goal": "Gather jeans options from Myntra",
+          "tier": "auto"
+        },
+        {
+          "type": "explore",
+          "goal": "Gather jeans options from Ajio",
+          "tier": "auto"
+        },
+        {
+          "type": "explore",
+          "goal": "Gather jeans options from Amazon Fashion",
+          "tier": "auto"
+        },
+        {
+          "type": "present",
+          "goal": "Show shortlisted jeans options with pros/cons",
+          "tier": "auto"
+        }
+      ]
+    },
+    {
+      "i": 2,
+      "goal": "buy me a gift",
+      "kind": "shop",
+      "ok": true,
+      "failed": [],
+      "n": 1,
+      "types": [
+        "ask_user"
+      ],
+      "plan": [
+        {
+          "type": "ask_user",
+          "goal": "Determine gift category",
+          "tier": "auto"
+        }
+      ]
+    },
+    {
+      "i": 3,
+      "goal": "i want something to wear to a party",
+      "kind": "shop",
+      "ok": true,
+      "failed": [],
+      "n": 6,
+      "types": [
+        "ask_user",
+        "explore",
+        "explore",
+        "explore",
+        "exploit",
+        "present"
+      ],
+      "plan": [
+        {
+          "type": "ask_user",
+          "goal": "Clarify style and budget preferences for the party outfit",
+          "tier": "auto"
+        },
+        {
+          "type": "explore",
+          "goal": "Search Myntra for party wear based on user preferences",
+          "tier": "auto"
+        },
+        {
+          "type": "explore",
+          "goal": "Search Ajio for party wear based on user preferences",
+          "tier": "auto"
+        },
+        {
+          "type": "explore",
+          "goal": "Search Amazon Fashion for party wear based on user preferences",
+          "tier": "auto"
+        },
+        {
+          "type": "exploit",
+          "goal": "Rank options by user preferences (price, ratings)",
+          "tier": "auto"
+        },
+        {
+          "type": "present",
+          "goal": "Show curated party wear options with pros/cons",
+          "tier": "auto"
+        }
+      ]
+    },
+    {
+      "i": 4,
+      "goal": "get me a phone",
+      "kind": "shop",
+      "ok": true,
+      "failed": [],
+      "n": 5,
+      "types": [
+        "ask_user",
+        "explore",
+        "explore",
+        "exploit",
+        "present"
+      ],
+      "plan": [
+        {
+          "type": "ask_user",
+          "goal": "Clarify brand preference for the phone",
+          "tier": "auto"
+        },
+        {
+          "type": "explore",
+          "goal": "Search for top phone options on Amazon.in",
+          "tier": "auto"
+        },
+        {
+          "type": "explore",
+          "goal": "Search for top phone options on Flipkart",
+          "tier": "auto"
+        },
+        {
+          "type": "exploit",
+          "goal": "Rank phones by price, brand preference, and features",
+          "tier": "auto"
+        },
+        {
+          "type": "present",
+          "goal": "Show shortlisted phone options with pros/cons",
+          "tier": "auto"
+        }
+      ]
+    },
+    {
+      "i": 5,
+      "goal": "find me a laptop",
+      "kind": "shop",
+      "ok": true,
+      "failed": [],
+      "n": 4,
+      "types": [
+        "ask_user",
+        "ask_user",
+        "explore",
+        "present"
+      ],
+      "plan": [
+        {
+          "type": "ask_user",
+          "goal": "find me a laptop",
+          "tier": "auto"
+        },
+        {
+          "type": "ask_user",
+          "goal": "find me a laptop",
+          "tier": "auto"
+        },
+        {
+          "type": "explore",
+          "goal": "find me a laptop",
+          "tier": "auto"
+        },
+        {
+          "type": "present",
+          "goal": "find me a laptop",
+          "tier": "auto"
+        }
+      ]
+    },
+    {
+      "i": 6,
+      "goal": "i need shoes",
+      "kind": "shop",
+      "ok": true,
+      "failed": [],
+      "n": 4,
+      "types": [
+        "ask_user",
+        "explore",
+        "exploit",
+        "present"
+      ],
+      "plan": [
+        {
+          "type": "ask_user",
+          "goal": "i need shoes",
+          "tier": "auto"
+        },
+        {
+          "type": "explore",
+          "goal": "Search shoe retailers for options",
+          "tier": "auto"
+        },
+        {
+          "type": "exploit",
+          "goal": "Rank shoe options",
+          "tier": "auto"
+        },
+        {
+          "type": "present",
+          "goal": "Show recommended shoes",
+          "tier": "auto"
+        }
+      ]
+    },
+    {
+      "i": 7,
+      "goal": "buy a watch",
+      "kind": "shop",
+      "ok": true,
+      "failed": [],
+      "n": 6,
+      "types": [
+        "ask_user",
+        "explore",
+        "exploit",
+        "present",
+        "act",
+        "act"
+      ],
+      "plan": [
+        {
+          "type": "ask_user",
+          "goal": "Determine brand preference for the watch",
+          "tier": "auto"
+        },
+        {
+          "type": "explore",
+          "goal": "Search for watches on top Indian retailers",
+          "tier": "auto"
+        },
+        {
+          "type": "exploit",
+          "goal": "Rank options by user preferences (brand, price)",
+          "tier": "auto"
+        },
+        {
+          "type": "present",
+          "goal": "Show shortlisted watch options",
+          "tier": "auto"
+        },
+        {
+          "type": "act",
+          "goal": "Add selected watch to cart",
+          "tier": "confirm"
+        },
+        {
+          "type": "act",
+          "goal": "Proceed to payment page",
+          "tier": "secured"
+        }
+      ]
+    },
+    {
+      "i": 8,
+      "goal": "i need something for my kitchen",
+      "kind": "shop",
+      "ok": true,
+      "failed": [],
+      "n": 1,
+      "types": [
+        "ask_user"
+      ],
+      "plan": [
+        {
+          "type": "ask_user",
+          "goal": "Clarify what kitchen item the user needs",
+          "tier": "auto"
+        }
+      ]
+    },
+    {
+      "i": 9,
+      "goal": "a present for my mom",
+      "kind": "shop",
+      "ok": true,
+      "failed": [],
+      "n": 1,
+      "types": [
+        "ask_user"
+      ],
+      "plan": [
+        {
+          "type": "ask_user",
+          "goal": "Determine gift category and preferences",
+          "tier": "auto"
+        }
+      ]
+    },
+    {
+      "i": 10,
+      "goal": "i need a bag",
+      "kind": "shop",
+      "ok": true,
+      "failed": [],
+      "n": 4,
+      "types": [
+        "explore",
+        "explore",
+        "exploit",
+        "present"
+      ],
+      "plan": [
+        {
+          "type": "explore",
+          "goal": "Search for bags in the price range INR 1000-2000 on relevant retailers",
+          "tier": "auto"
+        },
+        {
+          "type": "explore",
+          "goal": "Collect additional bag options from Myntra's women's/lifestyle section",
+          "tier": "auto"
+        },
+        {
+          "type": "exploit",
+          "goal": "Rank options by user preferences (affordable, branded, good ratings)",
+          "tier": "auto"
+        },
+        {
+          "type": "present",
+          "goal": "Show shortlisted bag options with pros/cons and offers",
+          "tier": "auto"
+        }
+      ]
+    },
+    {
+      "i": 11,
+      "goal": "get me headphones",
+      "kind": "shop",
+      "ok": true,
+      "failed": [],
+      "n": 4,
+      "types": [
+        "ask_user",
+        "ask_user",
+        "explore",
+        "present"
+      ],
+      "plan": [
+        {
+          "type": "ask_user",
+          "goal": "Determine brand preferences for headphones",
+          "tier": "auto"
+        },
+        {
+          "type": "ask_user",
+          "goal": "Determine budget range for headphones",
+          "tier": "auto"
+        },
+        {
+          "type": "explore",
+          "goal": "Search for headphones on top Indian retailers",
+          "tier": "auto"
+        },
+        {
+          "type": "present",
+          "goal": "Show shortlisted headphone options with pros/cons",
+          "tier": "auto"
+        }
+      ]
+    },
+    {
+      "i": 12,
+      "goal": "i want a jacket for winter",
+      "kind": "shop",
+      "ok": true,
+      "failed": [],
+      "n": 4,
+      "types": [
+        "ask_user",
+        "explore",
+        "exploit",
+        "present"
+      ],
+      "plan": [
+        {
+          "type": "ask_user",
+          "goal": "Clarify budget and brand preferences for the winter jacket",
+          "tier": "auto"
+        },
+        {
+          "type": "explore",
+          "goal": "Search winter jackets on top retailers",
+          "tier": "auto"
+        },
+        {
+          "type": "exploit",
+          "goal": "Rank jackets based on user preferences",
+          "tier": "auto"
+        },
+        {
+          "type": "present",
+          "goal": "Show shortlisted winter jackets with pros/cons",
+          "tier": "auto"
+        }
+      ]
+    },
+    {
+      "i": 13,
+      "goal": "need a new tv",
+      "kind": "shop",
+      "ok": true,
+      "failed": [],
+      "n": 4,
+      "types": [
+        "ask_user",
+        "explore",
+        "exploit",
+        "present"
+      ],
+      "plan": [
+        {
+          "type": "ask_user",
+          "goal": "Determine user preferences for TV purchase",
+          "tier": "auto"
+        },
+        {
+          "type": "explore",
+          "goal": "Search for TVs matching user preferences",
+          "tier": "auto"
+        },
+        {
+          "type": "exploit",
+          "goal": "Rank TV options based on user preferences",
+          "tier": "auto"
+        },
+        {
+          "type": "present",
+          "goal": "Show shortlisted TV options",
+          "tier": "auto"
+        }
+      ]
+    },
+    {
+      "i": 14,
+      "goal": "i want a smartwatch",
+      "kind": "shop",
+      "ok": true,
+      "failed": [],
+      "n": 5,
+      "types": [
+        "ask_user",
+        "explore",
+        "explore",
+        "exploit",
+        "present"
+      ],
+      "plan": [
+        {
+          "type": "ask_user",
+          "goal": "Determine brand preferences and budget for the smartwatch",
+          "tier": "auto"
+        },
+        {
+          "type": "explore",
+          "goal": "Search for smartwatches on Amazon India",
+          "tier": "auto"
+        },
+        {
+          "type": "explore",
+          "goal": "Search for smartwatches on Flipkart",
+          "tier": "auto"
+        },
+        {
+          "type": "exploit",
+          "goal": "Rank smartwatches based on user preferences",
+          "tier": "auto"
+        },
+        {
+          "type": "present",
+          "goal": "Show shortlisted smartwatch options",
+          "tier": "auto"
+        }
+      ]
+    },
+    {
+      "i": 15,
+      "goal": "find me a good perfume",
+      "kind": "shop",
+      "ok": true,
+      "failed": [],
+      "n": 6,
+      "types": [
+        "ask_user",
+        "explore",
+        "explore",
+        "explore",
+        "exploit",
+        "present"
+      ],
+      "plan": [
+        {
+          "type": "ask_user",
+          "goal": "Clarify preferences for perfume selection",
+          "tier": "auto"
+        },
+        {
+          "type": "explore",
+          "goal": "Search perfumeIndia.in for options",
+          "tier": "auto"
+        },
+        {
+          "type": "explore",
+          "goal": "Search Nykaa for options",
+          "tier": "auto"
+        },
+        {
+          "type": "explore",
+          "goal": "Search Amazon.in for options",
+          "tier": "auto"
+        },
+        {
+          "type": "exploit",
+          "goal": "Rank perfumes based on user preferences",
+          "tier": "auto"
+        },
+        {
+          "type": "present",
+          "goal": "Show curated perfume options",
+          "tier": "auto"
+        }
+      ]
+    },
+    {
+      "i": 16,
+      "goal": "i need sunglasses",
+      "kind": "shop",
+      "ok": true,
+      "failed": [],
+      "n": 5,
+      "types": [
+        "explore",
+        "explore",
+        "explore",
+        "exploit",
+        "present"
+      ],
+      "plan": [
+        {
+          "type": "explore",
+          "goal": "Find sunglasses options on Myntra",
+          "tier": "auto"
+        },
+        {
+          "type": "explore",
+          "goal": "Find sunglasses options on Ajio",
+          "tier": "auto"
+        },
+        {
+          "type": "explore",
+          "goal": "Find sunglasses options on Amazon Fashion",
+          "tier": "auto"
+        },
+        {
+          "type": "exploit",
+          "goal": "Rank sunglasses by price and brand popularity",
+          "tier": "auto"
+        },
+        {
+          "type": "present",
+          "goal": "Show top sunglasses options with pros/cons",
+          "tier": "auto"
+        }
+      ]
+    },
+    {
+      "i": 17,
+      "goal": "buy a toy for a 5 year old",
+      "kind": "shop",
+      "ok": true,
+      "failed": [],
+      "n": 3,
+      "types": [
+        "explore",
+        "exploit",
+        "present"
+      ],
+      "plan": [
+        {
+          "type": "explore",
+          "goal": "Search for popular toys for 5-year-olds",
+          "tier": "auto"
+        },
+        {
+          "type": "exploit",
+          "goal": "Rank toys by safety, educational value, and popularity",
+          "tier": "auto"
+        },
+        {
+          "type": "present",
+          "goal": "Show shortlisted toys with pros/cons and offers",
+          "tier": "auto"
+        }
+      ]
+    },
+    {
+      "i": 18,
+      "goal": "i want a coffee maker",
+      "kind": "shop",
+      "ok": true,
+      "failed": [],
+      "n": 4,
+      "types": [
+        "explore",
+        "explore",
+        "explore",
+        "present"
+      ],
+      "plan": [
+        {
+          "type": "explore",
+          "goal": "Find coffee makers on Amazon.in",
+          "tier": "auto"
+        },
+        {
+          "type": "explore",
+          "goal": "Find coffee makers on Flipkart",
+          "tier": "auto"
+        },
+        {
+          "type": "explore",
+          "goal": "Find coffee makers on Croma",
+          "tier": "auto"
+        },
+        {
+          "type": "present",
+          "goal": "Show shortlisted coffee makers from all sources",
+          "tier": "auto"
+        }
+      ]
+    },
+    {
+      "i": 19,
+      "goal": "get me a backpack for travel",
+      "kind": "shop",
+      "ok": true,
+      "failed": [],
+      "n": 5,
+      "types": [
+        "explore",
+        "explore",
+        "explore",
+        "exploit",
+        "present"
+      ],
+      "plan": [
+        {
+          "type": "explore",
+          "goal": "Search for travel backpacks on Amazon.in",
+          "tier": "auto"
+        },
+        {
+          "type": "explore",
+          "goal": "Search for travel backpacks on Flipkart",
+          "tier": "auto"
+        },
+        {
+          "type": "explore",
+          "goal": "Search for travel backpacks on Myntra",
+          "tier": "auto"
+        },
+        {
+          "type": "exploit",
+          "goal": "Rank backpacks by durability and lightweight criteria",
+          "tier": "auto"
+        },
+        {
+          "type": "present",
+          "goal": "Show top travel backpack options with pros/cons",
+          "tier": "auto"
+        }
+      ]
+    },
+    {
+      "i": 20,
+      "goal": "i need a gift for a wedding",
+      "kind": "shop",
+      "ok": true,
+      "failed": [],
+      "n": 2,
+      "types": [
+        "explore",
+        "present"
+      ],
+      "plan": [
+        {
+          "type": "explore",
+          "goal": "Search for trending wedding gift ideas and retailers",
+          "tier": "auto"
+        },
+        {
+          "type": "present",
+          "goal": "Show curated wedding gift options",
+          "tier": "auto"
+        }
+      ]
+    },
+    {
+      "i": 21,
+      "goal": "what's the best phone right now",
+      "kind": "compare",
+      "ok": true,
+      "failed": [],
+      "n": 4,
+      "types": [
+        "explore",
+        "explore",
+        "exploit",
+        "present"
+      ],
+      "plan": [
+        {
+          "type": "explore",
+          "goal": "Discover top phone models available in India",
+          "tier": "auto"
+        },
+        {
+          "type": "explore",
+          "goal": "Compare flagship models from top brands",
+          "tier": "auto"
+        },
+        {
+          "type": "exploit",
+          "goal": "Rank phones by value proposition",
+          "tier": "auto"
+        },
+        {
+          "type": "present",
+          "goal": "Show top 3 phone options with analysis",
+          "tier": "auto"
+        }
+      ]
+    },
+    {
+      "i": 22,
+      "goal": "compare laptops for me",
+      "kind": "compare",
+      "ok": true,
+      "failed": [],
+      "n": 5,
+      "types": [
+        "explore",
+        "explore",
+        "explore",
+        "exploit",
+        "present"
+      ],
+      "plan": [
+        {
+          "type": "explore",
+          "goal": "Search for latest laptop models and specs",
+          "tier": "auto"
+        },
+        {
+          "type": "explore",
+          "goal": "Compare laptops on Amazon.in",
+          "tier": "auto"
+        },
+        {
+          "type": "explore",
+          "goal": "Compare laptops on Flipkart",
+          "tier": "auto"
+        },
+        {
+          "type": "exploit",
+          "goal": "Rank laptops based on performance-to-price ratio",
+          "tier": "auto"
+        },
+        {
+          "type": "present",
+          "goal": "Show comparison of top laptop options",
+          "tier": "auto"
+        }
+      ]
+    },
+    {
+      "i": 23,
+      "goal": "which headphones should i buy",
+      "kind": "compare",
+      "ok": true,
+      "failed": [],
+      "n": 4,
+      "types": [
+        "ask_user",
+        "explore",
+        "exploit",
+        "present"
+      ],
+      "plan": [
+        {
+          "type": "ask_user",
+          "goal": "Clarify user preferences for headphones",
+          "tier": "auto"
+        },
+        {
+          "type": "explore",
+          "goal": "Search for top-rated headphones matching user preferences",
+          "tier": "auto"
+        },
+        {
+          "type": "exploit",
+          "goal": "Rank options based on user preferences",
+          "tier": "auto"
+        },
+        {
+          "type": "present",
+          "goal": "Show shortlisted options with pros/cons",
+          "tier": "auto"
+        }
+      ]
+    },
+    {
+      "i": 24,
+      "goal": "best budget smartwatch",
+      "kind": "compare",
+      "ok": true,
+      "failed": [],
+      "n": 4,
+      "types": [
+        "ask_user",
+        "explore",
+        "exploit",
+        "present"
+      ],
+      "plan": [
+        {
+          "type": "ask_user",
+          "goal": "Clarify budget and brand preferences for the smartwatch",
+          "tier": "auto"
+        },
+        {
+          "type": "explore",
+          "goal": "Search for budget smartwatches on top Indian e-commerce platforms",
+          "tier": "auto"
+        },
+        {
+          "type": "exploit",
+          "goal": "Rank smartwatches based on budget, features, and battery life",
+          "tier": "auto"
+        },
+        {
+          "type": "present",
+          "goal": "Show shortlisted budget smartwatches with pros/cons and offers",
+          "tier": "auto"
+        }
+      ]
+    },
+    {
+      "i": 25,
+      "goal": "what laptop is good for gaming",
+      "kind": "compare",
+      "ok": true,
+      "failed": [],
+      "n": 2,
+      "types": [
+        "explore",
+        "present"
+      ],
+      "plan": [
+        {
+          "type": "explore",
+          "goal": "Find top gaming laptops",
+          "tier": "auto"
+        },
+        {
+          "type": "present",
+          "goal": "Show shortlisted gaming laptops",
+          "tier": "auto"
+        }
+      ]
+    },
+    {
+      "i": 26,
+      "goal": "find the cheapest tv",
+      "kind": "compare",
+      "ok": true,
+      "failed": [],
+      "n": 6,
+      "types": [
+        "explore",
+        "explore",
+        "explore",
+        "explore",
+        "exploit",
+        "present"
+      ],
+      "plan": [
+        {
+          "type": "explore",
+          "goal": "Search for TVs on Amazon.in",
+          "tier": "auto"
+        },
+        {
+          "type": "explore",
+          "goal": "Search for TVs on Flipkart",
+          "tier": "auto"
+        },
+        {
+          "type": "explore",
+          "goal": "Search for TVs on Croma",
+          "tier": "auto"
+        },
+        {
+          "type": "explore",
+          "goal": "Search for TVs on Reliance Digital",
+          "tier": "auto"
+        },
+        {
+          "type": "exploit",
+          "goal": "Rank TVs by price",
+          "tier": "auto"
+        },
+        {
+          "type": "present",
+          "goal": "Show cheapest TV options",
+          "tier": "auto"
+        }
+      ]
+    },
+    {
+      "i": 27,
+      "goal": "best running shoes",
+      "kind": "compare",
+      "ok": true,
+      "failed": [],
+      "n": 4,
+      "types": [
+        "ask_user",
+        "explore",
+        "exploit",
+        "present"
+      ],
+      "plan": [
+        {
+          "type": "ask_user",
+          "goal": "Determine budget and brand preferences for running shoes",
+          "tier": "auto"
+        },
+        {
+          "type": "explore",
+          "goal": "Search for top running shoes based on user preferences",
+          "tier": "auto"
+        },
+        {
+          "type": "exploit",
+          "goal": "Rank options by price, brand reputation, and customer ratings",
+          "tier": "auto"
+        },
+        {
+          "type": "present",
+          "goal": "Show shortlisted running shoes with pros/cons and offers",
+          "tier": "auto"
+        }
+      ]
+    },
+    {
+      "i": 28,
+      "goal": "good cheap earbuds",
+      "kind": "compare",
+      "ok": true,
+      "failed": [],
+      "n": 3,
+      "types": [
+        "explore",
+        "exploit",
+        "present"
+      ],
+      "plan": [
+        {
+          "type": "explore",
+          "goal": "Find cheap earbuds with good reviews",
+          "tier": "auto"
+        },
+        {
+          "type": "exploit",
+          "goal": "Rank options by price and user preferences",
+          "tier": "auto"
+        },
+        {
+          "type": "present",
+          "goal": "Show shortlisted options with pros/cons",
+          "tier": "auto"
+        }
+      ]
+    },
+    {
+      "i": 29,
+      "goal": "what's a good gift under 1000",
+      "kind": "compare",
+      "ok": true,
+      "failed": [],
+      "n": 3,
+      "types": [
+        "ask_user",
+        "explore",
+        "present"
+      ],
+      "plan": [
+        {
+          "type": "ask_user",
+          "goal": "Determine gift category (e.g., electronics, books, clothing, gadgets)",
+          "tier": "auto"
+        },
+        {
+          "type": "explore",
+          "goal": "Search for gift options under \u20b91000 in selected category",
+          "tier": "auto"
+        },
+        {
+          "type": "present",
+          "goal": "Show shortlisted gift options with pros/cons and offers",
+          "tier": "auto"
+        }
+      ]
+    },
+    {
+      "i": 30,
+      "goal": "which tablet should i get",
+      "kind": "compare",
+      "ok": true,
+      "failed": [],
+      "n": 4,
+      "types": [
+        "ask_user",
+        "explore",
+        "exploit",
+        "present"
+      ],
+      "plan": [
+        {
+          "type": "ask_user",
+          "goal": "Clarify budget, brand, and key requirements for the tablet",
+          "tier": "auto"
+        },
+        {
+          "type": "explore",
+          "goal": "Search for tablets matching user preferences",
+          "tier": "auto"
+        },
+        {
+          "type": "exploit",
+          "goal": "Rank tablets based on user preferences",
+          "tier": "auto"
+        },
+        {
+          "type": "present",
+          "goal": "Show comparison of top tablet options",
+          "tier": "auto"
+        }
+      ]
+    },
+    {
+      "i": 31,
+      "goal": "book me a flight",
+      "kind": "book",
+      "ok": true,
+      "failed": [],
+      "n": 6,
+      "types": [
+        "ask_user",
+        "explore",
+        "explore",
+        "exploit",
+        "present",
+        "act"
+      ],
+      "plan": [
+        {
+          "type": "ask_user",
+          "goal": "Clarify flight details",
+          "tier": "auto"
+        },
+        {
+          "type": "explore",
+          "goal": "Search flights on Google",
+          "tier": "auto"
+        },
+        {
+          "type": "explore",
+          "goal": "Compare on Indian flight aggregators",
+          "tier": "auto"
+        },
+        {
+          "type": "exploit",
+          "goal": "Rank flights by user preferences",
+          "tier": "auto"
+        },
+        {
+          "type": "present",
+          "goal": "Show flight options",
+          "tier": "auto"
+        },
+        {
+          "type": "act",
+          "goal": "Book selected flight",
+          "tier": "secured"
+        }
+      ]
+    },
+    {
+      "i": 32,
+      "goal": "find a hotel",
+      "kind": "book",
+      "ok": true,
+      "failed": [],
+      "n": 4,
+      "types": [
+        "ask_user",
+        "explore",
+        "exploit",
+        "present"
+      ],
+      "plan": [
+        {
+          "type": "ask_user",
+          "goal": "find a hotel",
+          "tier": "auto"
+        },
+        {
+          "type": "explore",
+          "goal": "find a hotel",
+          "tier": "auto"
+        },
+        {
+          "type": "exploit",
+          "goal": "find a hotel",
+          "tier": "auto"
+        },
+        {
+          "type": "present",
+          "goal": "find a hotel",
+          "tier": "auto"
+        }
+      ]
+    },
+    {
+      "i": 33,
+      "goal": "i want to go somewhere this weekend",
+      "kind": "book",
+      "ok": true,
+      "failed": [],
+      "n": 1,
+      "types": [
+        "ask_user"
+      ],
+      "plan": [
+        {
+          "type": "ask_user",
+          "goal": "Clarify the user's intent for 'go somewhere' (travel destination, local outing, activity, etc.)",
+          "tier": "auto"
+        }
+      ]
+    },
+    {
+      "i": 34,
+      "goal": "book a cab",
+      "kind": "book",
+      "ok": true,
+      "failed": [],
+      "n": 5,
+      "types": [
+        "ask_user",
+        "explore",
+        "explore",
+        "present",
+        "act"
+      ],
+      "plan": [
+        {
+          "type": "ask_user",
+          "goal": "Gather pickup and destination locations",
+          "tier": "auto"
+        },
+        {
+          "type": "explore",
+          "goal": "Check Ola for available rides",
+          "tier": "auto"
+        },
+        {
+          "type": "explore",
+          "goal": "Check Uber for available rides",
+          "tier": "auto"
+        },
+        {
+          "type": "present",
+          "goal": "Show available ride options",
+          "tier": "auto"
+        },
+        {
+          "type": "act",
+          "goal": "Book selected ride",
+          "tier": "confirm"
+        }
+      ]
+    },
+    {
+      "i": 35,
+      "goal": "i need a train ticket",
+      "kind": "book",
+      "ok": true,
+      "failed": [],
+      "n": 1,
+      "types": [
+        "ask_user"
+      ],
+      "plan": [
+        {
+          "type": "ask_user",
+          "goal": "i need a train ticket",
+          "tier": "auto"
+        }
+      ]
+    },
+    {
+      "i": 36,
+      "goal": "find me a restaurant nearby",
+      "kind": "book",
+      "ok": true,
+      "failed": [],
+      "n": 3,
+      "types": [
+        "ask_user",
+        "explore",
+        "present"
+      ],
+      "plan": [
+        {
+          "type": "ask_user",
+          "goal": "find me a restaurant nearby",
+          "tier": "auto"
+        },
+        {
+          "type": "explore",
+          "goal": "Search for nearby restaurants",
+          "tier": "auto"
+        },
+        {
+          "type": "present",
+          "goal": "Show restaurant options",
+          "tier": "auto"
+        }
+      ]
+    },
+    {
+      "i": 37,
+      "goal": "book a table for dinner",
+      "kind": "book",
+      "ok": true,
+      "failed": [],
+      "n": 5,
+      "types": [
+        "ask_user",
+        "explore",
+        "present",
+        "ask_user",
+        "act"
+      ],
+      "plan": [
+        {
+          "type": "ask_user",
+          "goal": "Gather necessary details to book a table",
+          "tier": "auto"
+        },
+        {
+          "type": "explore",
+          "goal": "Search for available restaurants",
+          "tier": "auto"
+        },
+        {
+          "type": "present",
+          "goal": "Show restaurant options",
+          "tier": "auto"
+        },
+        {
+          "type": "ask_user",
+          "goal": "Confirm restaurant and booking details",
+          "tier": "auto"
+        },
+        {
+          "type": "act",
+          "goal": "Complete table booking",
+          "tier": "confirm"
+        }
+      ]
+    },
+    {
+      "i": 38,
+      "goal": "plan a trip for me",
+      "kind": "book",
+      "ok": true,
+      "failed": [],
+      "n": 6,
+      "types": [
+        "ask_user",
+        "explore",
+        "explore",
+        "ask_user",
+        "exploit",
+        "present"
+      ],
+      "plan": [
+        {
+          "type": "ask_user",
+          "goal": "Determine travel preferences",
+          "tier": "auto"
+        },
+        {
+          "type": "explore",
+          "goal": "Search flights",
+          "tier": "auto"
+        },
+        {
+          "type": "explore",
+          "goal": "Search accommodations",
+          "tier": "auto"
+        },
+        {
+          "type": "ask_user",
+          "goal": "Confirm travel preferences",
+          "tier": "auto"
+        },
+        {
+          "type": "exploit",
+          "goal": "Select best flight and hotel combo",
+          "tier": "auto"
+        },
+        {
+          "type": "present",
+          "goal": "Show trip options",
+          "tier": "auto"
+        }
+      ]
+    },
+    {
+      "i": 39,
+      "goal": "i want a vacation",
+      "kind": "book",
+      "ok": true,
+      "failed": [],
+      "n": 1,
+      "types": [
+        "ask_user"
+      ],
+      "plan": [
+        {
+          "type": "ask_user",
+          "goal": "Clarify vacation preferences",
+          "tier": "auto"
+        }
+      ]
+    },
+    {
+      "i": 40,
+      "goal": "get me tickets for a movie",
+      "kind": "book",
+      "ok": true,
+      "failed": [],
+      "n": 5,
+      "types": [
+        "ask_user",
+        "ask_user",
+        "explore",
+        "present",
+        "act"
+      ],
+      "plan": [
+        {
+          "type": "ask_user",
+          "goal": "Identify the movie for which the user wants tickets",
+          "tier": "auto"
+        },
+        {
+          "type": "ask_user",
+          "goal": "Determine the user's preferred theater location",
+          "tier": "auto"
+        },
+        {
+          "type": "explore",
+          "goal": "Search for showtimes and ticket availability",
+          "tier": "auto"
+        },
+        {
+          "type": "present",
+          "goal": "Show available showtimes and options",
+          "tier": "auto"
+        },
+        {
+          "type": "act",
+          "goal": "Proceed to book selected showtime",
+          "tier": "confirm"
+        }
+      ]
+    },
+    {
+      "i": 41,
+      "goal": "order food",
+      "kind": "service",
+      "ok": true,
+      "failed": [],
+      "n": 5,
+      "types": [
+        "ask_user",
+        "explore",
+        "exploit",
+        "present",
+        "act"
+      ],
+      "plan": [
+        {
+          "type": "ask_user",
+          "goal": "Clarify food preferences",
+          "tier": "auto"
+        },
+        {
+          "type": "explore",
+          "goal": "Search food delivery options",
+          "tier": "auto"
+        },
+        {
+          "type": "exploit",
+          "goal": "Rank restaurants by preference",
+          "tier": "auto"
+        },
+        {
+          "type": "present",
+          "goal": "Show restaurant options",
+          "tier": "auto"
+        },
+        {
+          "type": "act",
+          "goal": "Place order",
+          "tier": "secured"
+        }
+      ]
+    },
+    {
+      "i": 42,
+      "goal": "i'm hungry",
+      "kind": "service",
+      "ok": true,
+      "failed": [],
+      "n": 1,
+      "types": [
+        "ask_user"
+      ],
+      "plan": [
+        {
+          "type": "ask_user",
+          "goal": "i'm hungry",
+          "tier": "auto"
+        }
+      ]
+    },
+    {
+      "i": 43,
+      "goal": "get me a pizza",
+      "kind": "service",
+      "ok": true,
+      "failed": [],
+      "n": 4,
+      "types": [
+        "ask_user",
+        "explore",
+        "exploit",
+        "present"
+      ],
+      "plan": [
+        {
+          "type": "ask_user",
+          "goal": "Clarify delivery preference and pizza type",
+          "tier": "auto"
+        },
+        {
+          "type": "explore",
+          "goal": "Search top pizza delivery services",
+          "tier": "auto"
+        },
+        {
+          "type": "exploit",
+          "goal": "Rank options by user preferences",
+          "tier": "auto"
+        },
+        {
+          "type": "present",
+          "goal": "Show shortlisted pizza options",
+          "tier": "auto"
+        }
+      ]
+    },
+    {
+      "i": 44,
+      "goal": "find a plumber",
+      "kind": "service",
+      "ok": true,
+      "failed": [],
+      "n": 3,
+      "types": [
+        "ask_user",
+        "explore",
+        "present"
+      ],
+      "plan": [
+        {
+          "type": "ask_user",
+          "goal": "Find a plumber",
+          "tier": "auto"
+        },
+        {
+          "type": "explore",
+          "goal": "Search plumbers in [USER_LOCATION]",
+          "tier": "auto"
+        },
+        {
+          "type": "present",
+          "goal": "Show top plumber options",
+          "tier": "auto"
+        }
+      ]
+    },
+    {
+      "i": 45,
+      "goal": "book a doctor appointment",
+      "kind": "service",
+      "ok": true,
+      "failed": [],
+      "n": 6,
+      "types": [
+        "ask_user",
+        "explore",
+        "explore",
+        "explore",
+        "present",
+        "act"
+      ],
+      "plan": [
+        {
+          "type": "ask_user",
+          "goal": "Determine the user's preferred doctor specialty and location",
+          "tier": "auto"
+        },
+        {
+          "type": "explore",
+          "goal": "Search for available doctors on Practo",
+          "tier": "auto"
+        },
+        {
+          "type": "explore",
+          "goal": "Search for available doctors on Lybrate",
+          "tier": "auto"
+        },
+        {
+          "type": "explore",
+          "goal": "Search for available doctors on Apollo Hospitals",
+          "tier": "auto"
+        },
+        {
+          "type": "present",
+          "goal": "Show shortlisted doctors with availability and fees",
+          "tier": "auto"
+        },
+        {
+          "type": "act",
+          "goal": "Book the selected appointment",
+          "tier": "confirm"
+        }
+      ]
+    },
+    {
+      "i": 46,
+      "goal": "track my package",
+      "kind": "service",
+      "ok": true,
+      "failed": [],
+      "n": 2,
+      "types": [
+        "ask_user",
+        "act"
+      ],
+      "plan": [
+        {
+          "type": "ask_user",
+          "goal": "Identify the carrier and tracking number",
+          "tier": "auto"
+        },
+        {
+          "type": "act",
+          "goal": "Navigate to the carrier's tracking page and input the tracking number",
+          "tier": "auto"
+        }
+      ]
+    },
+    {
+      "i": 47,
+      "goal": "renew my netflix subscription",
+      "kind": "direct",
+      "ok": true,
+      "failed": [],
+      "n": 4,
+      "types": [
+        "act",
+        "act",
+        "act",
+        "act"
+      ],
+      "plan": [
+        {
+          "type": "act",
+          "goal": "Navigate to Netflix's subscription management page",
+          "tier": "auto"
+        },
+        {
+          "type": "act",
+          "goal": "Select subscription renewal option",
+          "tier": "auto"
+        },
+        {
+          "type": "act",
+          "goal": "Confirm current plan and payment method",
+          "tier": "auto"
+        },
+        {
+          "type": "act",
+          "goal": "Complete subscription renewal",
+          "tier": "secured"
+        }
+      ]
+    },
+    {
+      "i": 48,
+      "goal": "i'm bored",
+      "kind": "vague",
+      "ok": true,
+      "failed": [],
+      "n": 1,
+      "types": [
+        "ask_user"
+      ],
+      "plan": [
+        {
+          "type": "ask_user",
+          "goal": "i'm bored",
+          "tier": "auto"
+        }
+      ]
+    },
+    {
+      "i": 49,
+      "goal": "surprise me",
+      "kind": "vague",
+      "ok": true,
+      "failed": [],
+      "n": 1,
+      "types": [
+        "ask_user"
+      ],
+      "plan": [
+        {
+          "type": "ask_user",
+          "goal": "surprise me",
+          "tier": "auto"
+        }
+      ]
+    },
+    {
+      "i": 50,
+      "goal": "do something useful today",
+      "kind": "vague",
+      "ok": true,
+      "failed": [],
+      "n": 1,
+      "types": [
+        "ask_user"
+      ],
+      "plan": [
+        {
+          "type": "ask_user",
+          "goal": "Clarify what 'useful' activity to pursue",
+          "tier": "auto"
+        }
+      ]
+    }
+  ]
+}

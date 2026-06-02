@@ -1,0 +1,722 @@
+{
+  "rate": "53/53",
+  "results": [
+    {
+      "i": 1,
+      "name": "google search box",
+      "ok": true,
+      "action": "browser_type",
+      "cat": "progress",
+      "expect": [
+        "progress"
+      ],
+      "args": {
+        "target": "e1",
+        "text": "wireless earbuds"
+      }
+    },
+    {
+      "i": 2,
+      "name": "amazon search box",
+      "ok": true,
+      "action": "browser_type",
+      "cat": "progress",
+      "expect": [
+        "progress"
+      ],
+      "args": {
+        "target": "e1",
+        "text": "coffee maker"
+      }
+    },
+    {
+      "i": 3,
+      "name": "empty searchbox on store",
+      "ok": true,
+      "action": "browser_type",
+      "cat": "progress",
+      "expect": [
+        "progress"
+      ],
+      "args": {
+        "target": "e1",
+        "text": "running shoes"
+      }
+    },
+    {
+      "i": 4,
+      "name": "flight search form",
+      "ok": true,
+      "action": "browser_type",
+      "cat": "progress",
+      "expect": [
+        "progress"
+      ],
+      "args": {
+        "target": "e1",
+        "text": "Delhi"
+      }
+    },
+    {
+      "i": 5,
+      "name": "address bar wrong page",
+      "ok": true,
+      "action": "browser_navigate",
+      "cat": "progress",
+      "expect": [
+        "progress"
+      ],
+      "args": {
+        "url": "https://www.flipkart.com/"
+      }
+    },
+    {
+      "i": 6,
+      "name": "dropdown to set size",
+      "ok": true,
+      "action": "browser_select_option",
+      "cat": "progress",
+      "expect": [
+        "progress"
+      ],
+      "args": {
+        "target": "e1",
+        "value": "9"
+      }
+    },
+    {
+      "i": 7,
+      "name": "quantity field",
+      "ok": true,
+      "action": "browser_type",
+      "cat": "progress",
+      "expect": [
+        "progress"
+      ],
+      "args": {
+        "target": "e1",
+        "text": "2"
+      }
+    },
+    {
+      "i": 8,
+      "name": "pagination next",
+      "ok": true,
+      "action": "browser_click",
+      "cat": "progress",
+      "expect": [
+        "progress"
+      ],
+      "args": {
+        "target": "e20"
+      }
+    },
+    {
+      "i": 9,
+      "name": "scroll for more",
+      "ok": true,
+      "action": "browser_scroll",
+      "cat": "progress",
+      "expect": [
+        "complete",
+        "progress"
+      ],
+      "args": {
+        "direction": "down"
+      }
+    },
+    {
+      "i": 10,
+      "name": "type in filter",
+      "ok": true,
+      "action": "browser_type",
+      "cat": "progress",
+      "expect": [
+        "progress"
+      ],
+      "args": {
+        "target": "e1",
+        "text": "2000"
+      }
+    },
+    {
+      "i": 11,
+      "name": "click category link",
+      "ok": true,
+      "action": "browser_click",
+      "cat": "progress",
+      "expect": [
+        "progress"
+      ],
+      "args": {
+        "target": "e1"
+      }
+    },
+    {
+      "i": 12,
+      "name": "login then continue",
+      "ok": true,
+      "action": "browser_type",
+      "cat": "progress",
+      "expect": [
+        "ask",
+        "progress"
+      ],
+      "args": {
+        "target": "e1",
+        "text": "user@example.com"
+      }
+    },
+    {
+      "i": 13,
+      "name": "add to cart",
+      "ok": true,
+      "action": "browser_click",
+      "cat": "progress",
+      "expect": [
+        "progress"
+      ],
+      "args": {
+        "target": "e5"
+      }
+    },
+    {
+      "i": 14,
+      "name": "apply coupon field",
+      "ok": true,
+      "action": "browser_type",
+      "cat": "progress",
+      "expect": [
+        "progress"
+      ],
+      "args": {
+        "target": "e1",
+        "text": "SAVE10"
+      }
+    },
+    {
+      "i": 15,
+      "name": "date picker",
+      "ok": true,
+      "action": "browser_click",
+      "cat": "progress",
+      "expect": [
+        "progress"
+      ],
+      "args": {
+        "target": "e1"
+      }
+    },
+    {
+      "i": 16,
+      "name": "results visible explore",
+      "ok": true,
+      "action": "subgoal_complete",
+      "cat": "complete",
+      "expect": [
+        "complete"
+      ],
+      "args": {
+        "note": "Earbud listings are visible"
+      }
+    },
+    {
+      "i": 17,
+      "name": "heading matches goal",
+      "ok": true,
+      "action": "subgoal_complete",
+      "cat": "complete",
+      "expect": [
+        "complete"
+      ],
+      "args": {
+        "note": "The Order History page is shown"
+      }
+    },
+    {
+      "i": 18,
+      "name": "item in cart",
+      "ok": true,
+      "action": "subgoal_complete",
+      "cat": "complete",
+      "expect": [
+        "complete"
+      ],
+      "args": {
+        "note": "Item confirmed in cart"
+      }
+    },
+    {
+      "i": 19,
+      "name": "search results present",
+      "ok": true,
+      "action": "subgoal_complete",
+      "cat": "complete",
+      "expect": [
+        "complete"
+      ],
+      "args": {
+        "note": "Jeans search results are shown"
+      }
+    },
+    {
+      "i": 20,
+      "name": "logged in confirmed",
+      "ok": true,
+      "action": "subgoal_complete",
+      "cat": "complete",
+      "expect": [
+        "complete"
+      ],
+      "args": {
+        "note": "Already signed in"
+      }
+    },
+    {
+      "i": 21,
+      "name": "confirmation page",
+      "ok": true,
+      "action": "subgoal_complete",
+      "cat": "complete",
+      "expect": [
+        "complete"
+      ],
+      "args": {
+        "note": "Booking confirmation reference found"
+      }
+    },
+    {
+      "i": 22,
+      "name": "dropdown listed explore",
+      "ok": true,
+      "action": "subgoal_complete",
+      "cat": "complete",
+      "expect": [
+        "complete",
+        "progress"
+      ],
+      "args": {
+        "note": "Colour options are visible"
+      }
+    },
+    {
+      "i": 23,
+      "name": "heading h1 read",
+      "ok": true,
+      "action": "subgoal_complete",
+      "cat": "complete",
+      "expect": [
+        "complete"
+      ],
+      "args": {
+        "note": "The main heading text is 'Welcome to Acme'"
+      }
+    },
+    {
+      "i": 24,
+      "name": "price visible",
+      "ok": true,
+      "action": "subgoal_complete",
+      "cat": "complete",
+      "expect": [
+        "complete"
+      ],
+      "args": {
+        "note": "Product price is visible"
+      }
+    },
+    {
+      "i": 25,
+      "name": "restaurant list",
+      "ok": true,
+      "action": "subgoal_complete",
+      "cat": "complete",
+      "expect": [
+        "complete"
+      ],
+      "args": {
+        "note": "List of nearby restaurants found"
+      }
+    },
+    {
+      "i": 26,
+      "name": "recipe shown",
+      "ok": true,
+      "action": "subgoal_complete",
+      "cat": "complete",
+      "expect": [
+        "complete"
+      ],
+      "args": {
+        "note": "Recipe with full ingredient list found"
+      }
+    },
+    {
+      "i": 27,
+      "name": "amazon captcha",
+      "ok": true,
+      "action": "escalate",
+      "cat": "escalate",
+      "expect": [
+        "escalate",
+        "progress"
+      ],
+      "args": {
+        "reason": "captcha page"
+      }
+    },
+    {
+      "i": 28,
+      "name": "google unusual traffic",
+      "ok": true,
+      "action": "browser_click",
+      "cat": "progress",
+      "expect": [
+        "escalate",
+        "progress"
+      ],
+      "args": {
+        "target": "e1"
+      }
+    },
+    {
+      "i": 29,
+      "name": "access denied",
+      "ok": true,
+      "action": "escalate",
+      "cat": "escalate",
+      "expect": [
+        "escalate",
+        "progress"
+      ],
+      "args": {
+        "reason": "Access denied page"
+      }
+    },
+    {
+      "i": 30,
+      "name": "press and hold wall",
+      "ok": true,
+      "action": "browser_click",
+      "cat": "progress",
+      "expect": [
+        "escalate",
+        "progress"
+      ],
+      "args": {
+        "target": "e1"
+      }
+    },
+    {
+      "i": 31,
+      "name": "404 page",
+      "ok": true,
+      "action": "browser_click",
+      "cat": "progress",
+      "expect": [
+        "escalate",
+        "progress"
+      ],
+      "args": {
+        "target": "e2"
+      }
+    },
+    {
+      "i": 32,
+      "name": "element absent for goal",
+      "ok": true,
+      "action": "escalate",
+      "cat": "escalate",
+      "expect": [
+        "escalate",
+        "progress"
+      ],
+      "args": {
+        "reason": "The 'Track Order' button is not visible on the current page."
+      }
+    },
+    {
+      "i": 33,
+      "name": "server error",
+      "ok": true,
+      "action": "escalate",
+      "cat": "escalate",
+      "expect": [
+        "escalate",
+        "progress"
+      ],
+      "args": {
+        "reason": "The page is showing a 500 Internal Server Error"
+      }
+    },
+    {
+      "i": 34,
+      "name": "ambiguous which item to add",
+      "ok": true,
+      "action": "browser_click",
+      "cat": "progress",
+      "expect": [
+        "ask",
+        "escalate",
+        "progress"
+      ],
+      "args": {
+        "target": "e11"
+      }
+    },
+    {
+      "i": 35,
+      "name": "payment needs confirm",
+      "ok": true,
+      "action": "browser_click",
+      "cat": "progress",
+      "expect": [
+        "ask",
+        "progress"
+      ],
+      "args": {
+        "target": "e1"
+      }
+    },
+    {
+      "i": 36,
+      "name": "which address",
+      "ok": true,
+      "action": "browser_click",
+      "cat": "progress",
+      "expect": [
+        "ask",
+        "progress"
+      ],
+      "args": {
+        "target": "e1"
+      }
+    },
+    {
+      "i": 37,
+      "name": "cookie banner",
+      "ok": true,
+      "action": "browser_click",
+      "cat": "progress",
+      "expect": [
+        "complete",
+        "progress"
+      ],
+      "args": {
+        "target": "e1"
+      }
+    },
+    {
+      "i": 38,
+      "name": "newsletter popup",
+      "ok": true,
+      "action": "browser_click",
+      "cat": "progress",
+      "expect": [
+        "complete",
+        "progress"
+      ],
+      "args": {
+        "target": "e2"
+      }
+    },
+    {
+      "i": 39,
+      "name": "age gate",
+      "ok": true,
+      "action": "browser_click",
+      "cat": "progress",
+      "expect": [
+        "progress"
+      ],
+      "args": {
+        "target": "e1"
+      }
+    },
+    {
+      "i": 40,
+      "name": "about:blank",
+      "ok": true,
+      "action": "browser_navigate",
+      "cat": "progress",
+      "expect": [
+        "progress"
+      ],
+      "args": {
+        "url": "https://www.myntra.com/mens-jeans"
+      }
+    },
+    {
+      "i": 41,
+      "name": "empty body",
+      "ok": true,
+      "action": "browser_navigate",
+      "cat": "progress",
+      "expect": [
+        "progress"
+      ],
+      "args": {
+        "url": "https://www.google.com"
+      }
+    },
+    {
+      "i": 42,
+      "name": "only nav no content",
+      "ok": true,
+      "action": "browser_click",
+      "cat": "progress",
+      "expect": [
+        "progress"
+      ],
+      "args": {
+        "target": "e3"
+      }
+    },
+    {
+      "i": 43,
+      "name": "type query then submit",
+      "ok": true,
+      "action": "browser_type",
+      "cat": "progress",
+      "expect": [
+        "progress"
+      ],
+      "args": {
+        "target": "e1",
+        "text": "Mumbai weather"
+      }
+    },
+    {
+      "i": 44,
+      "name": "click first result",
+      "ok": true,
+      "action": "browser_click",
+      "cat": "progress",
+      "expect": [
+        "progress"
+      ],
+      "args": {
+        "target": "e1"
+      }
+    },
+    {
+      "i": 45,
+      "name": "select payment method",
+      "ok": true,
+      "action": "browser_click",
+      "cat": "progress",
+      "expect": [
+        "progress"
+      ],
+      "args": {
+        "target": "e2"
+      }
+    },
+    {
+      "i": 46,
+      "name": "fill review text",
+      "ok": true,
+      "action": "browser_type",
+      "cat": "progress",
+      "expect": [
+        "progress"
+      ],
+      "args": {
+        "target": "e1",
+        "text": "great product"
+      }
+    },
+    {
+      "i": 47,
+      "name": "expand details",
+      "ok": true,
+      "action": "browser_click",
+      "cat": "progress",
+      "expect": [
+        "complete",
+        "progress"
+      ],
+      "args": {
+        "target": "e1"
+      }
+    },
+    {
+      "i": 48,
+      "name": "choose variant",
+      "ok": true,
+      "action": "browser_click",
+      "cat": "progress",
+      "expect": [
+        "progress"
+      ],
+      "args": {
+        "target": "e2"
+      }
+    },
+    {
+      "i": 49,
+      "name": "results explore many",
+      "ok": true,
+      "action": "subgoal_complete",
+      "cat": "complete",
+      "expect": [
+        "complete"
+      ],
+      "args": {
+        "note": "List of laptops is visible"
+      }
+    },
+    {
+      "i": 50,
+      "name": "hotel results explore",
+      "ok": true,
+      "action": "subgoal_complete",
+      "cat": "complete",
+      "expect": [
+        "complete"
+      ],
+      "args": {
+        "note": "List of hotels in Goa is visible"
+      }
+    },
+    {
+      "i": 51,
+      "name": "retail phone grid explore",
+      "ok": true,
+      "action": "subgoal_complete",
+      "cat": "complete",
+      "expect": [
+        "complete"
+      ],
+      "args": {
+        "note": "5+ phone listings with prices are visible"
+      }
+    },
+    {
+      "i": 52,
+      "name": "spa chrome only -> progress",
+      "ok": true,
+      "action": "browser_scroll",
+      "cat": "progress",
+      "expect": [
+        "progress"
+      ],
+      "args": {
+        "direction": "down"
+      }
+    },
+    {
+      "i": 53,
+      "name": "category menu -> navigate/click",
+      "ok": true,
+      "action": "browser_click",
+      "cat": "progress",
+      "expect": [
+        "progress"
+      ],
+      "args": {
+        "target": "e102"
+      }
+    }
+  ]
+}

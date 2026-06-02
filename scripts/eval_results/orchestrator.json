@@ -1,0 +1,317 @@
+{
+  "rate": "52/52",
+  "results": [
+    {
+      "name": "single act completes",
+      "ok": true,
+      "note": "Done.",
+      "result": "Done."
+    },
+    {
+      "name": "three acts complete",
+      "ok": true,
+      "note": "Done. runs=3",
+      "result": "Done."
+    },
+    {
+      "name": "escalate then replan completes",
+      "ok": true,
+      "note": "Done. replans=1",
+      "result": "Done."
+    },
+    {
+      "name": "exhausted then replan completes",
+      "ok": true,
+      "note": "Done.",
+      "result": "Done."
+    },
+    {
+      "name": "replan budget exhausted -> Failed",
+      "ok": true,
+      "note": "Failed: exhausted re-plan budget at subgoal 1 (loop).",
+      "result": "Failed: exhausted re-plan budget at subgoal 1 (loop)."
+    },
+    {
+      "name": "max_replans=0 fails immediately",
+      "ok": true,
+      "note": "Failed: exhausted re-plan budget at subgoal 1 (x).",
+      "result": "Failed: exhausted re-plan budget at subgoal 1 (x)."
+    },
+    {
+      "name": "mixed act+act long plan",
+      "ok": true,
+      "note": "Done.",
+      "result": "Done."
+    },
+    {
+      "name": "denied status -> stopped",
+      "ok": true,
+      "note": "Stopped: user declined.",
+      "result": "Stopped: user declined."
+    },
+    {
+      "name": "explore complete + present",
+      "ok": true,
+      "note": "## Shortlist",
+      "result": "## Shortlist"
+    },
+    {
+      "name": "explore escalates but salvaged",
+      "ok": true,
+      "note": "## Salvaged",
+      "result": "## Salvaged"
+    },
+    {
+      "name": "explore exhausted but salvaged",
+      "ok": true,
+      "note": "## OK",
+      "result": "## OK"
+    },
+    {
+      "name": "explore complete no present -> Done",
+      "ok": true,
+      "note": "Done.",
+      "result": "Done."
+    },
+    {
+      "name": "explore nothing, none anywhere -> replan steer",
+      "ok": true,
+      "note": "[None, \"source 'www.amazon.in' yielded no candidates (looks like a bot-check / a",
+      "result": "Failed: exhausted re-plan budget at subgoal 1 (source 'www.a"
+    },
+    {
+      "name": "explore blocked names bot-check",
+      "ok": true,
+      "note": "no bot-check reason",
+      "result": "Failed: exhausted re-plan budget at subgoal 1 (source 'amazo"
+    },
+    {
+      "name": "two explores accumulate candidates",
+      "ok": true,
+      "note": "cands=2",
+      "result": "## Two"
+    },
+    {
+      "name": "explore nothing but earlier candidates proceed",
+      "ok": true,
+      "note": "## Proceed",
+      "result": "## Proceed"
+    },
+    {
+      "name": "present with zero candidates honest",
+      "ok": true,
+      "note": "I couldn't gather any options to compare. The sour",
+      "result": "I couldn't gather any options to compare. The sources may ha"
+    },
+    {
+      "name": "exploit picks cheapest+best",
+      "ok": true,
+      "note": "{'name': 'B', 'price': 50, 'rating': 4.8, 'source': 'y', '_score': 1.0}",
+      "result": "Done."
+    },
+    {
+      "name": "exploit price-only cheapest",
+      "ok": true,
+      "note": "price-only",
+      "result": "Done."
+    },
+    {
+      "name": "exploit rating-only best",
+      "ok": true,
+      "note": "rating-only",
+      "result": "Done."
+    },
+    {
+      "name": "exploit empty candidates -> None",
+      "ok": true,
+      "note": "expected None",
+      "result": "Done."
+    },
+    {
+      "name": "exploit near-tie flagged",
+      "ok": true,
+      "note": "expected near_tie",
+      "result": "Done."
+    },
+    {
+      "name": "exploit currency strings",
+      "ok": true,
+      "note": "currency parse",
+      "result": "Done."
+    },
+    {
+      "name": "exploit single candidate",
+      "ok": true,
+      "note": "single",
+      "result": "Done."
+    },
+    {
+      "name": "exploit then present uses selected",
+      "ok": true,
+      "note": "selected passed",
+      "result": "## Ranked"
+    },
+    {
+      "name": "ask answered steers replan",
+      "ok": true,
+      "note": "answer not in goal",
+      "result": "Done."
+    },
+    {
+      "name": "ask skip sentinel broadens",
+      "ok": true,
+      "note": "no broaden steer",
+      "result": "Done."
+    },
+    {
+      "name": "ask empty answer broadens",
+      "ok": true,
+      "note": "empty not broadened",
+      "result": "Done."
+    },
+    {
+      "name": "clarification cap reached",
+      "ok": true,
+      "note": "asks=0 r=Done.",
+      "result": "Done."
+    },
+    {
+      "name": "ask multi-select value",
+      "ok": true,
+      "note": "multi val",
+      "result": "Done."
+    },
+    {
+      "name": "confirm approved proceeds",
+      "ok": true,
+      "note": "Done.",
+      "result": "Done."
+    },
+    {
+      "name": "confirm denied stops",
+      "ok": true,
+      "note": "Stopped: user declined approval.",
+      "result": "Stopped: user declined approval."
+    },
+    {
+      "name": "secured denied stops",
+      "ok": true,
+      "note": "Stopped: user declined approval.",
+      "result": "Stopped: user declined approval."
+    },
+    {
+      "name": "secured approved proceeds",
+      "ok": true,
+      "note": "Done.",
+      "result": "Done."
+    },
+    {
+      "name": "needs_approval flag pauses",
+      "ok": true,
+      "note": "Stopped: user declined approval.",
+      "result": "Stopped: user declined approval."
+    },
+    {
+      "name": "approval timeout denies",
+      "ok": true,
+      "note": "Stopped: user declined approval.",
+      "result": "Stopped: user declined approval."
+    },
+    {
+      "name": "auto step then confirm approved",
+      "ok": true,
+      "note": "Done.",
+      "result": "Done."
+    },
+    {
+      "name": "confirm denied on second step",
+      "ok": true,
+      "note": "Stopped: user declined approval.",
+      "result": "Stopped: user declined approval."
+    },
+    {
+      "name": "grounding injected into preamble",
+      "ok": true,
+      "note": "no inject",
+      "result": "Done."
+    },
+    {
+      "name": "grounding off not called",
+      "ok": true,
+      "note": "ran anyway",
+      "result": "Done."
+    },
+    {
+      "name": "grounding empty keeps preamble clean",
+      "ok": true,
+      "note": "''",
+      "result": "Done."
+    },
+    {
+      "name": "grounding emits event",
+      "ok": true,
+      "note": "no grounding event",
+      "result": "Done."
+    },
+    {
+      "name": "emits plan event",
+      "ok": true,
+      "note": "['plan', 'subgoal_start', 'subgoal_end']",
+      "result": "Done."
+    },
+    {
+      "name": "emits subgoal_start/end",
+      "ok": true,
+      "note": "['plan', 'subgoal_start', 'subgoal_end']",
+      "result": "Done."
+    },
+    {
+      "name": "present emits present event",
+      "ok": true,
+      "note": "['plan', 'subgoal_start', 'candidates', 'subgoal_end', 'subgoal_start', 'present', 'subgoa",
+      "result": "## P"
+    },
+    {
+      "name": "candidates event on explore",
+      "ok": true,
+      "note": "['plan', 'subgoal_start', 'candidates', 'subgoal_end']",
+      "result": "Done."
+    },
+    {
+      "name": "replan event carries reason",
+      "ok": true,
+      "note": "reason missing",
+      "result": "Done."
+    },
+    {
+      "name": "re-plan three times then succeed",
+      "ok": true,
+      "note": "Done.",
+      "result": "Done."
+    },
+    {
+      "name": "explore denied not extracted",
+      "ok": true,
+      "note": "Stopped: user declined.",
+      "result": "Stopped: user declined."
+    },
+    {
+      "name": "long explore->exploit->present pipeline",
+      "ok": true,
+      "note": "pipeline",
+      "result": "## Pipe"
+    },
+    {
+      "name": "explore 0 on snapshot, salvaged via content extractor",
+      "ok": true,
+      "note": "## Salvaged readable=True",
+      "result": "## Salvaged"
+    },
+    {
+      "name": "explore 0 and readable also empty -> replan",
+      "ok": true,
+      "note": "Failed: exhausted re-plan budget at subgoal 1 (source 'shop' yielded no candidates (no lis",
+      "result": "Failed: exhausted re-plan budget at subgoal 1 (source 'shop'"
+    }
+  ]
+}

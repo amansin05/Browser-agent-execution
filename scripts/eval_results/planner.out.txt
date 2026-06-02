@@ -1,0 +1,58 @@
+Planner eval: 50 ambiguous goals (planner only), concurrency=5
+
+  [PASS] i need new jeans                           explore,explore,exploit,present,act
+  [PASS] buy me a gift                              ask_user
+  [PASS] i want something to wear to a party        ask_user
+  [PASS] get me a phone                             ask_user,explore,present
+  [PASS] find me a laptop                           ask_user,explore,explore,explore,exploit,present
+  [PASS] i need shoes                               ask_user
+  [PASS] buy a watch                                ask_user,explore,explore,exploit,present,act,act
+  [PASS] i need something for my kitchen            ask_user
+  [PASS] a present for my mom                       ask_user,explore,present
+  [PASS] i need a bag                               explore,explore,explore,explore,exploit,present
+  [PASS] get me headphones                          ask_user
+  [PASS] i want a jacket for winter                 ask_user
+  [PASS] need a new tv                              ask_user,explore,exploit,present
+  [PASS] i want a smartwatch                        ask_user,explore,present
+  [PASS] find me a good perfume                     ask_user,explore,exploit,present
+  [PASS] i need sunglasses                          explore,explore,explore,present
+  [PASS] buy a toy for a 5 year old                 ask_user,explore,exploit,present
+  [PASS] i want a coffee maker                      ask_user
+  [PASS] get me a backpack for travel               explore,explore,exploit,present
+  [PASS] i need a gift for a wedding                ask_user,explore,present
+  [PASS] what's the best phone right now            explore,exploit,present
+  [PASS] compare laptops for me                     explore,explore,explore,explore,present
+  [PASS] which headphones should i buy              ask_user,explore,exploit,present
+  [PASS] best budget smartwatch                     explore,explore,explore,explore,exploit,present
+  [PASS] what laptop is good for gaming             ask_user
+  [PASS] find the cheapest tv                       explore,explore,explore,exploit,present
+  [PASS] best running shoes                         explore,exploit,present,ask_user,act
+  [PASS] good cheap earbuds                         explore,explore,exploit,present
+  [PASS] what's a good gift under 1000              ask_user
+  [PASS] which tablet should i get                  ask_user,explore,explore,explore,exploit,present
+  [PASS] book me a flight                           ask_user
+  [FAIL] find a hotel                                 <-- EXCEPTION:JSONDecodeError
+  [PASS] i want to go somewhere this weekend        ask_user
+  [PASS] book a cab                                 explore,present,ask_user,act
+  [PASS] i need a train ticket                      ask_user
+  [PASS] find me a restaurant nearby                explore,present
+  [PASS] book a table for dinner                    ask_user,explore,explore,explore,exploit,present
+  [PASS] plan a trip for me                         ask_user
+  [PASS] i want a vacation                          ask_user
+  [PASS] get me tickets for a movie                 ask_user
+  [PASS] order food                                 ask_user,explore,exploit,present,explore,act,act
+  [PASS] i'm hungry                                 ask_user
+  [PASS] get me a pizza                             ask_user,explore,present
+  [PASS] find a plumber                             ask_user,explore,present
+  [PASS] book a doctor appointment                  ask_user,explore,exploit,present,ask_user,act
+  [PASS] track my package                           ask_user
+  [PASS] renew my netflix subscription              act,act,act,act
+  [PASS] i'm bored                                  ask_user
+  [PASS] surprise me                                ask_user
+  [PASS] do something useful today                  ask_user
+
+======================================================================
+PLANNER SUCCESS RATE: 49/50 = 98%
+Most-failed checks: EXCEPTION:JSONDecodeError=1
+Details -> C:\Users\varun\OneDrive\Desktop\Browser agent execution\scripts\eval_results\planner.json
+======================================================================
