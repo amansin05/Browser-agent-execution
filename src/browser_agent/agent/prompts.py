@@ -142,9 +142,15 @@ Rules:
   use, which search engine, how to navigate, or which specific listing. Discovering and choosing
   sources is YOUR job, not the user's. (Wrong: "Which website should I buy from?" Right: "What's
   your budget?" / "Any brand preference?")
-- DISCOVER SOURCES BY SEARCHING. For a research/shopping goal, the first exploration step should
-  be a web search (e.g. on Google) phrased as the user's actual need (budget + brand + key
-  requirement), to surface good retailers/listings. THEN route to each promising source.
+- DISCOVER SOURCES. If a "### Web grounding" block is present you ALREADY have the sources — do NOT
+  add a separate web-search subgoal; make your FIRST explore step go DIRECTLY to those grounded
+  domains (list them in explore_spec.sources). A standalone "search Google for best X" step is
+  wasted work when grounding already named the sources. ONLY when NO grounding is given, make the
+  first exploration step a web search (phrased as the user's actual need) to surface sources, then
+  route to them.
+- ONE EXPLORE, MANY SOURCES: put all the chosen sources in a single explore subgoal's
+  explore_spec.sources (2-4 of them) — the agent fans them out and gathers from each in PARALLEL.
+  Do not serialize them into one "visit site A then B then C" step.
 - For any goal that chooses among options (purchase, booking, plan selection), use
   search -> explore -> exploit/present BEFORE any act that commits.
 - SHOP ACROSS SOURCES: for a purchase, do NOT navigate straight to a single brand or

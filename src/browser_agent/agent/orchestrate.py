@@ -77,6 +77,24 @@ STAGNATION_LIMIT = 3
 BUDGET_WARN_FRACTION = 0.75
 
 
+def _expand_explore_sources(sg: dict) -> list[dict]:
+    """Split one explore subgoal into one-subgoal-per-source so they can run in parallel. A planner
+    often emits a SINGLE 'gather from these sites' explore with several sources in its explore_spec;
+    fanning it out is what lets the parallel gather actually engage (otherwise a lone explore flails
+    across the sites sequentially in one tab). Returns [sg] unchanged when there are <2 sources."""
+    spec = sg.get("explore_spec") or {}
+    sources = [s for s in (spec.get("sources") or []) if s]
+    if len(sources) < 2:
+        return [sg]
+    out = []
+    for k, src in enumerate(sources):
+        out.append({**sg,
+                    "id": f"{sg.get('id', 'e')}.{k}",
+                    "goal": f"{sg.get('goal', 'Gather candidates')} — from {src}",
+                    "explore_spec": {**spec, "sources": [src]}})
+    return out
+
+
 def _page_fingerprint(dom, url: str, snapshot_text: str):
     """A cheap identity of the current page used to detect stagnation. From the indexed view when we
     have one (url + scroll position + the set of interactive elements), else the a11y snapshot."""
@@ -362,13 +380,17 @@ async def orchestrate(groq, session, reasoner_tools, capabilities, goal, *, allo
             while j < len(plan) and plan[j].get("type", "act") == "explore":
                 run.append(plan[j])
                 j += 1
-            if len(run) >= 2:
-                log.info("dispatching %d explore subgoals in parallel", len(run))
+            # Fan EACH explore out into one subgoal per source (a planner often emits a single
+            # "gather from these sites" explore with several sources) so the parallel gather actually
+            # engages instead of one tab flailing across the sites sequentially.
+            expanded = [sub for e in run for sub in _expand_explore_sources(e)]
+            if len(expanded) >= 2:
+                log.info("dispatching %d explore source(s) in parallel", len(expanded))
                 results = await gather_parallel(
-                    groq, reasoner_tools, run, allowlist=allowlist, max_steps=max_steps + 6,
+                    groq, reasoner_tools, expanded, allowlist=allowlist, max_steps=max_steps + 6,
                     model=model, read_content=read_content, browser=browser, emit=emit)
-                for sg2 in run:
-                    cands = results.get(sg2.get("id"), [])
+                for sub in expanded:
+                    cands = results.get(sub.get("id"), [])
                     if cands:
                         state["candidates"].extend(cands)
                         observations.append(
@@ -376,7 +398,7 @@ async def orchestrate(groq, session, reasoner_tools, capabilities, goal, *, allo
                 log.info("parallel explore -> %d candidates total", len(state["candidates"]))
                 i = j
                 continue
-            # a lone explore -> fall through to the normal sequential path below
+            # a lone explore on a single source -> fall through to the normal sequential path below
 
         emit({"type": "subgoal_start", "id": sg["id"], "goal": sg["goal"], "kind": sg_type,
               "tier": tier, "success_condition": sg["success_condition"],

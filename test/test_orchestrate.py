@@ -248,3 +248,44 @@ async def test_select_candidates_empty():
     from browser_agent.agent.extract import select_candidates
     out = await select_candidates(None, "x", [])
     assert out["selected"] is None and out["top"] == []
+
+
+# ----------------------------------------------------------------- parallel fan-out
+def test_expand_explore_sources_fans_out_per_source():
+    sg = {"id": 2, "type": "explore", "goal": "gather books", "success_condition": "5+",
+          "explore_spec": {"sources": ["goodreads", "bookbub", "lithub"], "target_count": 5}}
+    out = orch._expand_explore_sources(sg)
+    assert [s["explore_spec"]["sources"] for s in out] == [["goodreads"], ["bookbub"], ["lithub"]]
+    assert [s["id"] for s in out] == ["2.0", "2.1", "2.2"]
+    assert "goodreads" in out[0]["goal"]
+    # <2 sources -> unchanged
+    assert orch._expand_explore_sources({"id": 1, "explore_spec": {"sources": ["x"]}})[0]["id"] == 1
+    assert len(orch._expand_explore_sources({"id": 1, "explore_spec": {}})) == 1
+
+
+async def test_orchestrate_fans_single_multisource_explore_into_parallel(monkeypatch):
+    captured = {}
+
+    async def fake_plan(*a, **k):
+        return [{"id": 1, "type": "explore", "goal": "gather", "success_condition": "5+",
+                 "tier": "auto", "needs_approval": False,
+                 "explore_spec": {"sources": ["goodreads", "bookbub"]}},
+                _present()]
+
+    async def fake_gather(groq, tools, subgoals, **k):
+        captured["subgoals"] = subgoals
+        return {s["id"]: [{"name": "B", "source": s["explore_spec"]["sources"][0]}] for s in subgoals}
+
+    async def fake_synth(groq, goal, cands, selected=None, *, model=None):
+        captured["cands"] = cands
+        return "## Shortlist"
+
+    monkeypatch.setattr(orch, "plan_subgoals", fake_plan)
+    monkeypatch.setattr(orch, "gather_parallel", fake_gather)
+    monkeypatch.setattr(orch, "synthesize_options", fake_synth)
+
+    result = await _orchestrate(parallel=True)
+    # The single 2-source explore was fanned out into 2 parallel workers, both aggregated.
+    assert len(captured["subgoals"]) == 2
+    assert len(captured["cands"]) == 2
+    assert result == "## Shortlist"
