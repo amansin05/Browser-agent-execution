@@ -251,3 +251,25 @@ async def test_is_followup_uses_llm_verdict():
 async def test_is_followup_defaults_true_without_prior_task():
     s = _tab_session(FakeTabSession([]), groq=None)
     assert await s._is_followup("anything") is True            # no prev task / no groq => resume
+
+
+# ----------------------------------------------------------------- dedicated working tab
+async def test_ensure_working_tab_opens_one_when_only_origin():
+    # Only your origin tab is open -> the agent must open + select its OWN tab so it never drives
+    # yours (this is what makes park/restore possible — there's a working tab to close).
+    fake = FakeTabSession([("http://example.com/page", True)])
+    s = _tab_session(fake, focus_url="http://localhost:5173/", origin_tab=(0, "http://example.com/page"))
+    s.use_extension = True
+    await s._ensure_working_tab()
+    assert any(n == "browser_tabs" and a.get("action") == "new" for n, a in fake.calls)
+    assert len(fake.tabs) == 2 and fake.tabs[-1]["current"] is True
+
+
+async def test_ensure_working_tab_noop_when_working_tab_exists():
+    # A working tab already exists (e.g. parked tabs were just reopened) -> don't open another.
+    fake = FakeTabSession([("http://example.com/page", True), ("http://shop.com/a", False)])
+    s = _tab_session(fake, focus_url="http://localhost:5173/", origin_tab=(0, "http://example.com/page"))
+    s.use_extension = True
+    await s._ensure_working_tab()
+    assert not any(n == "browser_tabs" and a.get("action") == "new" for n, a in fake.calls)
+    assert len(fake.tabs) == 2  # unchanged

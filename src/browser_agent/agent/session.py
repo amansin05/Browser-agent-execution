@@ -77,43 +77,46 @@ class AgentSession:
         listed = await self.session.list_tools()
         self.reasoner_tools, self.capabilities = build_reasoner_tools(listed.tools)
         self.flat_tools = flat_tools(listed.tools)
-        if self.use_extension and self.pick_tab:
-            await wait_for_real_tab(self.session)
-            # Defensive: if the tab you picked happens to be the chat/dev-ui itself, browse in a
-            # separate tab rather than navigating it away. (Tab-switching to the dev-ui still won't
-            # work in general — it lives outside Playwright's tab group; see README.)
-            await self._ensure_working_tab()
-        elif self.use_extension:
-            log.info("extension: operating on the controlled tab (your real profile)")
+        if self.use_extension:
+            if self.pick_tab:
+                await wait_for_real_tab(self.session)
+            log.info("extension: working in a DEDICATED tab; your picked tab is preserved")
+            # Capture the tab you're on BEFORE opening our own — it's the origin we never close and
+            # land back on when the run ends. (run_task's later capture becomes a no-op.)
+            self._origin_tab = await self._current_tab()
+            if self._origin_tab:
+                log.info("remembered origin tab #%s: %s", self._origin_tab[0], self._origin_tab[1][:80])
             await self._ensure_working_tab()
         return self
 
     async def _ensure_working_tab(self) -> None:
-        """Extension mode: never let the agent drive the chat-UI tab itself. If the tab the
-        extension attached to IS the chat UI, open a SEPARATE working tab and switch to it. This
-        (a) keeps the chat UI intact and visible to the user, and (b) leaves the chat tab listed
-        in browser_tabs as a non-current tab, so focus_chat_tab() can reliably switch back to it
-        to surface a question/approval. No-op when there's no chat URL (CLI) or it already has its
-        own tab."""
-        if not (self.session and self.focus_url):
+        """Extension mode: guarantee the agent has its OWN tab to drive, so it never navigates or
+        closes the tab you were on. The origin tab (and any chat/dev-ui tab) is preserved; a fresh
+        working tab is opened + selected only when the agent has NO working tab yet — at session
+        start, or after a previous task parked (closed) its working tabs and the new task isn't a
+        follow-up. No-op when a working tab already exists (e.g. parked tabs were just reopened)."""
+        if not (self.session and self.use_extension):
             return
         try:
             tabs = await self._list_tabs()
         except Exception:
             return
-        current = next(((idx, url) for idx, is_cur, url in tabs if is_cur), None)
-        if not (current and _same_page(current[1], self.focus_url)):
-            return  # agent already has a non-chat tab to work in — leave it be
+        keep = self._find_chat_tab(tabs)
+        keep_idx = keep[0] if keep else None
+        origin_idx = self._origin_tab[0] if self._origin_tab else None
+        has_working = any(
+            idx not in (keep_idx, origin_idx) and not _same_page(url, self.focus_url)
+            for idx, _is_cur, url in tabs)
+        if has_working:
+            return  # the agent already has a tab to work in (fresh or restored)
         try:
             before = {i for i, _, _ in tabs}
             await self.session.call_tool("browser_tabs", {"action": "new"})
-            # Select the freshly opened tab so the agent browses THERE, leaving the dev-ui tab
-            # connected but backgrounded (so focus_chat_tab can raise it to surface a prompt).
             after = await self._list_tabs()
             new = next((i for i, _, _ in after if i not in before), None)
             if new is not None:
                 await self.session.call_tool("browser_tabs", {"action": "select", "index": new})
-            log.info("opened a dedicated working tab so the chat/dev-ui tab stays put for prompts")
+                log.info("opened a dedicated working tab #%s (origin tab #%s preserved)", new, origin_idx)
         except Exception as e:
             log.warning("could not open a dedicated working tab (%r); driving the current tab", e)
 
@@ -170,6 +173,12 @@ class AgentSession:
                 log.warning("tab restore step failed (%r); continuing without reopening", e)
                 self._parked_tabs = []
         self._last_task = task
+
+        # Make sure the agent has its own working tab so it never drives/closes your origin tab.
+        # (A follow-up just reopened its parked tabs -> no-op; otherwise open a fresh one, since the
+        # previous task parked & closed its working tab.)
+        if self.use_extension:
+            await self._ensure_working_tab()
 
         # How we reach the human:
         #   1. In extension mode, render the prompt as an OVERLAY in the tab the agent is driving —
