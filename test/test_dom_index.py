@@ -99,6 +99,14 @@ def test_offscreen_elements_flagged():
     assert "off-screen" in out
 
 
+def test_render_shows_input_value():
+    # A filled input surfaces its current value so the model sees what's already typed.
+    el = {"i": 0, "tag": "input", "type": "search", "name": "Search products", "text": "",
+          "role": "", "href": "", "value": "iphone 15", "inViewport": True}
+    out = di._parse_dom_state(_dom_value([el])).render()
+    assert '="iphone 15"' in out and "Search products" in out
+
+
 # ----------------------------------------------------------------- index_dom (end to end via eval)
 async def test_index_dom_reads_buildDomTree_result():
     sess = FakeSession([eval_result(_dom_value([SEARCH, BTN]))])

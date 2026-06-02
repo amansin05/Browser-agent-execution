@@ -101,11 +101,34 @@ _BUILD_DOM_JS = """
     return false;
   };
 
+  const FORM = new Set(['input', 'textarea', 'select']);
+
+  // The accessible NAME — the label a human would call the control. Resolved the way browsers do:
+  // aria-label, then aria-labelledby's referenced text, then the associated <label> (for/wrapping),
+  // then placeholder/title/name/alt. This is the fix for inputs (a search box with only an id +
+  // <label> used to come back nameless, so the model couldn't pick it / picked the wrong index).
   const accName = (el) => {
-    const cands = [el.getAttribute('aria-label'), el.getAttribute('placeholder'),
-                   el.getAttribute('alt'), el.getAttribute('title'), el.getAttribute('name')];
-    if (typeof el.value === 'string') cands.push(el.value);
-    for (const c of cands) { if (c && String(c).trim()) return String(c).trim().slice(0, MAX_TEXT); }
+    try {
+      const al = el.getAttribute('aria-label');
+      if (al && al.trim()) return al.trim().slice(0, MAX_TEXT);
+      const lb = el.getAttribute('aria-labelledby');
+      if (lb) {
+        const t = lb.split(/\\s+/).map(id => {
+          const e = document.getElementById(id);
+          return e ? (e.innerText || e.textContent || '') : '';
+        }).join(' ').replace(/\\s+/g, ' ').trim();
+        if (t) return t.slice(0, MAX_TEXT);
+      }
+      if (el.labels && el.labels.length) {
+        const t = Array.from(el.labels).map(l => l.innerText || l.textContent || '')
+          .join(' ').replace(/\\s+/g, ' ').trim();
+        if (t) return t.slice(0, MAX_TEXT);
+      }
+      for (const a of ['placeholder', 'title', 'name', 'alt']) {
+        const v = el.getAttribute(a);
+        if (v && v.trim()) return v.trim().slice(0, MAX_TEXT);
+      }
+    } catch (e) {}
     return '';
   };
 
@@ -124,21 +147,28 @@ _BUILD_DOM_JS = """
     let visible = false;
     try { visible = isVisible(node); } catch (e) {}
     if (visible && isInteractive(node) && (!inInteractive || isDistinct(node))) {
-      node.setAttribute('data-ba-id', String(idx));
-      let inv = false; try { inv = inViewport(node); } catch (e) {}
-      elements.push({
-        i: idx,
-        tag,
-        role: (node.getAttribute('role') || '').toLowerCase(),
-        type: (node.getAttribute('type') || '').toLowerCase(),
-        text: ownText(node),
-        name: accName(node),
-        href: tag === 'a' ? (node.getAttribute('href') || '') : '',
-        inViewport: inv,
-      });
-      idx++;
-      mine = true;
-      if (ATOMIC.has(tag)) return;  // don't descend into a button/link/input/select
+      const name = accName(node);
+      const text = ownText(node);
+      const href = tag === 'a' ? (node.getAttribute('href') || '') : '';
+      const value = FORM.has(tag) && typeof node.value === 'string' ? node.value.trim().slice(0, MAX_TEXT) : '';
+      // Drop label-less decorative matches (an icon/wrapper that only got picked up via
+      // cursor:pointer with no name/text/href) — the model can't address them anyway and they're
+      // pure noise. Keep all real form controls even when momentarily nameless.
+      if (!name && !text && !href && !value && !FORM.has(tag)) {
+        // skip this node, but still descend in case a labelled child lives inside it
+      } else {
+        node.setAttribute('data-ba-id', String(idx));
+        let inv = false; try { inv = inViewport(node); } catch (e) {}
+        elements.push({
+          i: idx, tag,
+          role: (node.getAttribute('role') || '').toLowerCase(),
+          type: (node.getAttribute('type') || '').toLowerCase(),
+          text, name, href, value, inViewport: inv,
+        });
+        idx++;
+        mine = true;
+        if (ATOMIC.has(tag)) return;  // don't descend into a button/link/input/select
+      }
     }
     const childInInteractive = inInteractive || mine;
     if (node.shadowRoot) {
@@ -174,11 +204,13 @@ class DomElement:
     text: str = ""
     name: str = ""
     href: str = ""
+    value: str = ""          # current value of an input/textarea/select (what's already typed in)
     in_viewport: bool = True
 
     def key(self) -> tuple:
         """A reflow-stable identity (NOT the index, which shifts) for marking NEW elements across
-        steps. Two renders of the same logical control share a key even if their index moved."""
+        steps. Two renders of the same logical control share a key even if their index moved.
+        (Excludes `value` so typing into a field doesn't make it look 'new' next step.)"""
         return (self.tag, self.role, self.type, self.name, self.href, self.text[:40])
 
     def render(self) -> str:
@@ -191,9 +223,10 @@ class DomElement:
             label = f"{self.name} | {self.text}"
         label = (label or "").strip()
         href = f" -> {self.href}" if self.href else ""
+        value = f' ="{self.value}"' if self.value else ""  # show what's already in the field
         offscreen = "" if self.in_viewport else " (off-screen — scroll to reach)"
         quoted = f' "{label}"' if label else ""
-        return f"[{self.index}] <{self.tag}{attrs}>{quoted}{href}{offscreen}"
+        return f"[{self.index}] <{self.tag}{attrs}>{quoted}{value}{href}{offscreen}"
 
 
 @dataclass
@@ -259,6 +292,7 @@ def _parse_dom_state(value) -> DomState | None:
             text=str(raw.get("text", "")),
             name=str(raw.get("name", "")),
             href=str(raw.get("href", "")),
+            value=str(raw.get("value", "")),
             in_viewport=bool(raw.get("inViewport", True)),
         ))
     return DomState(
