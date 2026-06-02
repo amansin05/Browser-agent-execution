@@ -58,6 +58,24 @@ MIN_INTERACTIVE_FOR_TEXT = 3
 # guard usually stops a batch sooner). Mirrors browser-use's max_actions_per_step.
 MAX_ACTIONS_PER_STEP = 5
 
+# Page-stagnation guard: if the page fingerprint is unchanged this many steps running DESPITE the
+# agent taking actions, those actions are having no effect (dead element, JS not firing) — nudge
+# once, then escalate. Complements loop detection (repeated identical actions); this catches
+# DIFFERENT actions that still change nothing. Mirrors browser-use's consecutive_stagnant_pages.
+STAGNATION_LIMIT = 3
+
+# Once the subgoal has burned this fraction of its step budget, warn the reasoner to land it or
+# escalate rather than fritter the tail away (browser-use's 75% budget nudge).
+BUDGET_WARN_FRACTION = 0.75
+
+
+def _page_fingerprint(dom, url: str, snapshot_text: str):
+    """A cheap identity of the current page used to detect stagnation. From the indexed view when we
+    have one (url + scroll position + the set of interactive elements), else the a11y snapshot."""
+    if dom is not None and dom.elements:
+        return ("dom", dom.url, dom.scroll_y, tuple(sorted(str(e.key()) for e in dom.elements)))
+    return ("a11y", url, hash(snapshot_text))
+
 
 async def _approve_with_timeout(approve, prompt: str, timeout: float = APPROVAL_TIMEOUT) -> bool:
     """Await an approval, but treat no-answer-in-time as a denial. Sync (CLI) callbacks aren't
@@ -72,7 +90,8 @@ async def _approve_with_timeout(approve, prompt: str, timeout: float = APPROVAL_
 
 
 async def run_subgoal(groq, session, reasoner_tools, subgoal, *, allowlist, approve, ask,
-                      observations, max_steps, model=MODEL, read_content=True, emit=None) -> tuple[str, str]:
+                      observations, max_steps, model=MODEL, read_content=True, emit=None,
+                      plan_context="") -> tuple[str, str]:
     """Drive one subgoal. Returns (status, detail) where status in
     {'complete','escalate','exhausted','denied'}. `emit(event_dict)` (optional) streams progress
     to a UI; prints are kept for the CLI. When `read_content` is set and a page's snapshot is too
@@ -90,6 +109,11 @@ async def run_subgoal(groq, session, reasoner_tools, subgoal, *, allowlist, appr
     previous_keys: set = set()  # interactive-element keys from the last step -> mark NEW ones (*)
     dom = None                  # the current indexed-DOM view (None when we fell back to a11y)
     last_thought = ""           # the reasoner's note from the prior turn, echoed back for continuity
+    last_fp = None              # page fingerprint from the prior step (stagnation detection)
+    stagnant = 0                # consecutive steps the page hasn't changed despite acting
+    stagnation_nudges = 0
+    budget_warned = False
+    acted = False               # did the PRIOR step execute a page action? (gates stagnation)
 
     for step in range(1, max_steps + 1):
         # Keep the agent and the user on the SAME tab. `working_tab` follows the tab a click opened
@@ -126,8 +150,40 @@ async def run_subgoal(groq, session, reasoner_tools, subgoal, *, allowlist, appr
                           step, len(extra))
                 emit({"type": "extract", "step": step, "chars": len(extra)})
                 snapshot_text = f"{snapshot_text}\n\n### Extracted readable content\n{extra[:6000]}"
+
+        # --- stagnation guard: did the page change since last step despite us acting? ---
+        # `acted` still holds whether the PRIOR step ran a page action; use it before resetting.
+        fp = _page_fingerprint(dom, url, snapshot_text)
+        if fp != last_fp:
+            stagnant = 0
+        elif step > 1 and acted:
+            stagnant += 1
+        last_fp = fp
+        if stagnant >= STAGNATION_LIMIT:
+            if stagnation_nudges < 1:
+                stagnation_nudges += 1
+                stagnant = 0
+                recent_actions.append(
+                    "STAGNANT: the page has NOT changed despite your last few actions — they are "
+                    "having no effect. Do NOT repeat them. Try a DIFFERENT element, navigate "
+                    "directly to a URL, or scroll; if you cannot make progress, escalate.")
+                emit({"type": "stagnation_nudge", "step": step})
+            else:
+                return "escalate", "page stagnant: actions had no visible effect"
+
+        # --- step-budget warning: near the end, push the reasoner to land it or escalate ---
+        if not budget_warned and step >= max(2, int(max_steps * BUDGET_WARN_FRACTION)):
+            budget_warned = True
+            recent_actions.append(
+                f"BUDGET: you have used {step}/{max_steps} steps. If the success condition is "
+                f"satisfied, call subgoal_complete now; otherwise make your single most decisive "
+                f"move (navigate directly to the target), or escalate if you are stuck.")
+            emit({"type": "budget_warning", "step": step, "max_steps": max_steps})
+
+        acted = False  # reset for THIS step; set True below only if a page action runs
         thought, actions = await reasoner_decide(
-            groq, reasoner_tools, subgoal, snapshot_text, recent_actions, last_thought, model=model)
+            groq, reasoner_tools, subgoal, snapshot_text, recent_actions, last_thought,
+            plan_context=plan_context, model=model)
         last_thought = thought
         actions = actions[:MAX_ACTIONS_PER_STEP]
         if not actions:                       # reasoner_decide always returns at least one
@@ -232,6 +288,7 @@ async def run_subgoal(groq, session, reasoner_tools, subgoal, *, allowlist, appr
                 break  # a blocked navigation ends the batch
 
             res = await execute_action(session, action, args)
+            acted = True  # a page action ran -> next step's stagnation check is meaningful
             rtext = res["outcome"]
             # FOLLOW a new tab the action opened (adopt + activate) so the agent works on the tab the
             # user is now looking at instead of being stranded on the opener.
@@ -372,9 +429,14 @@ async def orchestrate(groq, session, reasoner_tools, capabilities, goal, *, allo
         # Explore is the heaviest subgoal kind — it has to search, route to one or more sources,
         # and read enough to gather candidates — so give it more headroom than an act subgoal.
         sg_steps = max_steps + 6 if sg_type == "explore" else max_steps
+        prior_goals = [p["goal"] for p in plan[:i]]
+        plan_context = (f"Subgoal {i + 1} of {len(plan)} in the overall plan."
+                        + (f" Earlier subgoals already handled: {'; '.join(prior_goals[-4:])}."
+                           if prior_goals else ""))
         status, detail = await run_subgoal(
             groq, session, reasoner_tools, sg, allowlist=allowlist, approve=approve, ask=ask,
-            observations=observations, max_steps=sg_steps, model=model, read_content=read_content, emit=emit)
+            observations=observations, max_steps=sg_steps, model=model, read_content=read_content,
+            emit=emit, plan_context=plan_context)
 
         if sg_type == "explore" and status != "denied":
             # Extract whatever listings are on the current page — even when the reasoner escalated

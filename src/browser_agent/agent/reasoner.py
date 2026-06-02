@@ -53,7 +53,7 @@ def _explore_guidance(subgoal) -> str:
 
 
 async def reasoner_decide(groq, reasoner_tools, subgoal, snapshot_text, recent_actions,
-                          last_thought="", model=MODEL):
+                          last_thought="", plan_context="", model=MODEL):
     """One reasoner turn -> (thought, actions) where `actions` is an ordered list of (name, args).
     The model MAY emit several tool calls in one turn (e.g. fill a few fields then submit); the
     orchestrator executes them in order behind a page-change guard. `thought` is the model's
@@ -63,7 +63,8 @@ async def reasoner_decide(groq, reasoner_tools, subgoal, snapshot_text, recent_a
     `### Extracted readable content` block to `snapshot_text` — there is no image path."""
     recent = "\n".join(f"  {i+1}. {a}" for i, a in enumerate(recent_actions[-6:])) or "  (none yet)"
     note = f"### Your previous note\n{last_thought.strip()}\n\n" if last_thought.strip() else ""
-    user = (f"### Current subgoal\n{subgoal['goal']}\n"
+    progress = f"### Plan progress\n{plan_context.strip()}\n\n" if plan_context.strip() else ""
+    user = (f"{progress}### Current subgoal\n{subgoal['goal']}\n"
             f"Success when: {subgoal['success_condition']}\n"
             f"{_explore_guidance(subgoal)}\n"
             f"### Live page\n{snapshot_text[:9000]}\n\n"

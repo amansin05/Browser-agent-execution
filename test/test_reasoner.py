@@ -4,6 +4,7 @@ fallback that replaced vision. Planner-side behaviour lives in test_planner.py.
 """
 
 import copy
+import json
 from types import SimpleNamespace as NS
 
 from groq import BadRequestError
@@ -71,7 +72,7 @@ class FakeSession:
     routed to one or the other by inspecting the injected function (the build pass clears all
     data-ba-id attributes; an action queries one)."""
     def __init__(self, url="http://test.local/", raise_on=None, results=None,
-                 snapshot_body='- heading "h" [ref=e1]', dom=None, action_result=None):
+                 snapshot_body='- heading "h" [ref=e1]', dom=None, action_result=None, dom_vary=False):
         self.url = url
         self.calls = []
         self.raise_on = set(raise_on or ())
@@ -79,6 +80,8 @@ class FakeSession:
         self.snapshot_body = snapshot_body  # default has a ref => "sufficient"
         self.dom = dom                      # None => index_dom returns None => a11y fallback
         self.action_result = action_result if action_result is not None else {"ok": True}
+        self.dom_vary = dom_vary            # bump scrollY each build so the page fingerprint changes
+        self._builds = 0
 
     async def call_tool(self, name, args):
         self.calls.append((name, args))
@@ -87,8 +90,13 @@ class FakeSession:
         if name == "browser_evaluate":
             fn = args.get("function", "")
             if "querySelectorAll('[data-ba-id]')" in fn:          # the buildDomTree pass
-                return _eval_result(self.dom) if self.dom is not None \
-                    else NS(content=[NS(type="text", text="(no result)")], isError=False)
+                if self.dom is None:
+                    return NS(content=[NS(type="text", text="(no result)")], isError=False)
+                payload = dict(self.dom)
+                if self.dom_vary:                                 # simulate the page changing
+                    self._builds += 1
+                    payload["scrollY"] = self._builds * 100
+                return _eval_result(payload)
             return _eval_result(self.action_result)               # an index-action eval
         if name == "browser_snapshot":
             txt = f"### Page\n- Page URL: {self.url}\n### Snapshot\n```yaml\n{self.snapshot_body}\n```"
@@ -270,9 +278,11 @@ async def test_loop_detection_warns_once_before_escalating():
 
 async def test_loop_detection_same_action_varied_args():
     # Same action NAME with wobbling args (the Amazon failure shape) must still trip the looser
-    # name-based detector — after the one-shot nudge, a persistent name-loop escalates.
+    # name-based detector — after the one-shot nudge, a persistent name-loop escalates. dom_vary so
+    # the page DOES change each step (isolating the loose loop check from the stagnation guard).
     groq = FakeGroq([reasoner_resp("click_element", f'{{"index": {i}}}') for i in range(8)])
-    status, detail = await _run(groq, FakeSession(dom=_dom_payload()), max_steps=12, read_content=False)
+    status, detail = await _run(groq, FakeSession(dom=_dom_payload(), dom_vary=True),
+                                max_steps=12, read_content=False)
     assert status == "escalate" and "loop" in detail
 
 
@@ -323,6 +333,36 @@ async def test_page_guard_drops_actions_queued_after_a_navigation():
     assert ("browser_navigate", {"url": "http://test.local/list"}) in sess.calls
     fns = [a.get("function", "") for n, a in sess.calls if n == "browser_evaluate"]
     assert not any("el.click()" in f for f in fns)                   # the queued click was dropped
+
+
+# ----------------------------------------------------------------- robustness (C)
+async def test_stagnation_nudge_then_escalate():
+    # The page never changes but the agent keeps ACTING with DIFFERENT actions (so it's not a loop):
+    # stagnation detection nudges once, then escalates. (FakeSession returns a fixed DOM, so the
+    # page fingerprint is constant no matter the action.)
+    acts = [reasoner_resp("click_element", '{"index": 0}') if i % 2 == 0
+            else reasoner_resp("select_option", '{"index": 0, "value": "x"}') for i in range(8)]
+    status, detail = await _run(groq := FakeGroq(acts), FakeSession(dom=_dom_payload()),
+                                max_steps=12, read_content=False)
+    assert status == "escalate" and "stagnant" in detail
+
+
+async def test_budget_warning_emitted_near_end():
+    events = []
+    acts = [reasoner_resp("click_element", '{"index": 0}') if i % 2 == 0
+            else reasoner_resp("select_option", '{"index": 0, "value": "x"}') for i in range(6)]
+    status, _ = await run_subgoal(FakeGroq(acts), FakeSession(dom=_dom_payload()), [], SUBGOAL,
+                                  allowlist=set(), approve=lambda p: True, ask=lambda q: "",
+                                  observations=[], max_steps=4, read_content=False, emit=events.append)
+    assert status == "exhausted"
+    assert any(e["type"] == "budget_warning" and e["step"] == 3 for e in events)  # warn at 75%
+
+
+async def test_reasoner_decide_includes_plan_context():
+    groq = FakeGroq([reasoner_resp("scroll_page", '{"direction": "down"}')])
+    await reasoner_decide(groq, [], SUBGOAL, "snap", [], plan_context="Subgoal 2 of 5. Earlier: searched.")
+    prompt = groq.calls[0]["messages"][1]["content"]
+    assert "Plan progress" in prompt and "Subgoal 2 of 5" in prompt
 
 
 async def test_explore_spec_reaches_reasoner_prompt():
