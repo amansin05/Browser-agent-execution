@@ -279,30 +279,33 @@ class AgentSession:
         return next(((idx, url) for idx, is_cur, url in tabs if is_cur), None)
 
     async def _working_tabs(self) -> list[tuple[int, str]]:
-        """The agent's working tabs — every http(s) tab in the Playwright MCP group EXCEPT the
-        chat/origin tab (the one the user was on before automation, which we never close). These
-        are 'the group of tabs' that get parked & reopened. Returns [] when there's no identifiable
-        keep tab (e.g. CLI/smoke with no origin), which deliberately disables parking there so we
-        never close the last/only tab and orphan the browser context."""
+        """The agent's working tabs — the ones that get parked (closed, URLs stored) and reopened on
+        a follow-up.
+
+        EXTENSION mode (the product): close the WHOLE agent group — every controlled http(s) tab
+        EXCEPT the dev-ui/chat tab (which runs the UI and must stay). We deliberately do NOT preserve
+        an 'origin' fallback tab: the user falls back to the dev-ui, and the parked URLs are restored
+        next message. Closing the agent's only tab is fine here — the real Chrome keeps its other
+        tabs and the extension just empties its group.
+
+        SMOKE/CLI mode: keep the chat+origin tab (and bail if none) so we never close the launched
+        browser's last tab and orphan the context."""
         try:
             tabs = await self._list_tabs()
         except Exception:
             return []
+        # Only do the aggressive close-everything when we KNOW the dev-ui URL, so we can protect it.
+        if self.use_extension and self.focus_url:
+            return [(idx, url) for idx, _is_cur, url in tabs
+                    if url.startswith("http") and not _same_page(url, self.focus_url)]
         keep = self._find_chat_tab(tabs)
         if keep is None:
             return []
         keep_idx = keep[0]
         origin_idx = self._origin_tab[0] if self._origin_tab else None
-        out = []
-        for idx, _is_cur, url in tabs:
-            if idx == keep_idx or idx == origin_idx:
-                continue
-            if _same_page(url, self.focus_url):  # any chat-UI tab, regardless of index
-                continue
-            if not url.startswith("http"):       # skip extension/picker/blank pages
-                continue
-            out.append((idx, url))
-        return out
+        return [(idx, url) for idx, _is_cur, url in tabs
+                if url.startswith("http") and idx not in (keep_idx, origin_idx)
+                and not _same_page(url, self.focus_url)]
 
     async def _park_working_tabs(self) -> list[str]:
         """Record the working tabs' URLs, then close those tabs. Returns the parked URLs (or [] if

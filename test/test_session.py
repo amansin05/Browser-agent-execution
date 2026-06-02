@@ -176,7 +176,7 @@ class FakeTabSession:
         return NS(content=[NS(type="text", text="ok")], isError=False)
 
 
-def _tab_session(fake, *, focus_url=None, origin_tab=None, groq=None):
+def _tab_session(fake, *, focus_url=None, origin_tab=None, groq=None, use_extension=False):
     s = AgentSession.__new__(AgentSession)
     s.session = fake
     s.focus_url = focus_url
@@ -185,6 +185,7 @@ def _tab_session(fake, *, focus_url=None, origin_tab=None, groq=None):
     s._last_task = None
     s.memory = None
     s.groq = groq
+    s.use_extension = use_extension
     return s
 
 
@@ -199,10 +200,33 @@ async def test_working_tabs_excludes_origin_and_non_http():
 
 
 async def test_working_tabs_empty_when_no_keep_tab():
-    # No focus_url and no origin tab => no identifiable keep tab => parking disabled (returns []).
+    # Smoke/CLI: no focus_url and no origin tab => no identifiable keep tab => parking disabled.
     fake = FakeTabSession([("http://shop.com/a", True), ("http://shop.com/b", False)])
-    s = _tab_session(fake)
+    s = _tab_session(fake)  # use_extension=False
     assert await s._working_tabs() == []
+
+
+async def test_working_tabs_extension_closes_whole_group_except_devui():
+    # EXTENSION mode: close every controlled http tab EXCEPT the dev-ui/chat tab — including what
+    # used to be the preserved 'origin' tab. The user falls back to the dev-ui; URLs are restored.
+    fake = FakeTabSession([("http://localhost:5173/", True),            # dev-ui (chat) -> keep
+                           ("http://shop.com/a", False),
+                           ("http://example.com/origin", False),         # the old 'origin' -> closes
+                           ("chrome-extension://x/connect.html", False)])  # non-http -> skip
+    s = _tab_session(fake, focus_url="http://localhost:5173/",
+                     origin_tab=(2, "http://example.com/origin"), use_extension=True)
+    working = await s._working_tabs()
+    assert working == [(1, "http://shop.com/a"), (2, "http://example.com/origin")]
+
+
+async def test_park_extension_closes_everything_but_devui():
+    fake = FakeTabSession([("http://localhost:5173/", True),
+                           ("http://shop.com/a", False),
+                           ("http://shop.com/b", False)])
+    s = _tab_session(fake, focus_url="http://localhost:5173/", use_extension=True)
+    parked = await s._park_working_tabs()
+    assert parked == ["http://shop.com/a", "http://shop.com/b"]
+    assert [t["url"] for t in fake.tabs] == ["http://localhost:5173/"]  # only the dev-ui remains
 
 
 async def test_park_records_urls_and_closes_only_working_tabs():
