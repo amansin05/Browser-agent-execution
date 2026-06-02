@@ -44,10 +44,18 @@ SKIP_SENTINEL = "__no_preference__"
 # explore broadly instead.
 MAX_CLARIFICATIONS = 2
 
-# A standoff guard: the reasoner declares subgoal_complete, the verifier refuses, the reasoner
-# immediately re-declares — spamming until the step budget drains. After this many refused
-# completions in a subgoal, hand back to the planner instead.
-MAX_COMPLETE_REJECTS = 3
+# Control-flow philosophy: the LLM makes the decisions (when stuck, when done, which way to go). The
+# guards below DON'T force a give-up on first sight any more — they INFORM the reasoner (a nudge it
+# reads next turn) and let it decide. Code only steps in as a HIGH anti-runaway BACKSTOP, so a truly
+# stuck agent can't spin to the step budget. (max_steps + approval gates remain the only hard rails.)
+
+# Verifier keeps refusing a subgoal_complete: each refusal is fed back to the reasoner to retry
+# differently; only after THIS many refusals do we hand back to the planner (high backstop).
+MAX_COMPLETE_REJECTS = 6
+
+# Anti-runaway backstop: the reasoner choosing the EXACT same action this many times in a row is a
+# genuine infinite loop — force an escalate. (A developing loop just nudges; see below.)
+LOOP_HARD_STOP = 6
 
 # Below this many interactive elements, the indexed-DOM view alone is too thin to reason over (a
 # content blob, an article, a canvas) — append the cleaned page text (Readability -> trafilatura ->
@@ -58,10 +66,10 @@ MIN_INTERACTIVE_FOR_TEXT = 3
 # guard usually stops a batch sooner). Mirrors browser-use's max_actions_per_step.
 MAX_ACTIONS_PER_STEP = 5
 
-# Page-stagnation guard: if the page fingerprint is unchanged this many steps running DESPITE the
-# agent taking actions, those actions are having no effect (dead element, JS not firing) — nudge
-# once, then escalate. Complements loop detection (repeated identical actions); this catches
-# DIFFERENT actions that still change nothing. Mirrors browser-use's consecutive_stagnant_pages.
+# Page-stagnation signal: if the page fingerprint is unchanged this many steps running DESPITE the
+# agent acting, its actions are having no effect — we NUDGE the reasoner (inform-only; it decides
+# whether to change tactics or escalate). Catches DIFFERENT actions that still change nothing, which
+# the exact-loop backstop wouldn't.
 STAGNATION_LIMIT = 3
 
 # Once the subgoal has burned this fraction of its step budget, warn the reasoner to land it or
@@ -104,14 +112,12 @@ async def run_subgoal(groq, session, reasoner_tools, subgoal, *, allowlist, appr
     last_action = None
     name_repeat = 0
     complete_rejects = 0
-    loop_nudges = 0
     working_tab = None  # the tab the agent drives; we keep focus pinned here across new-tab popups
     previous_keys: set = set()  # interactive-element keys from the last step -> mark NEW ones (*)
     dom = None                  # the current indexed-DOM view (None when we fell back to a11y)
     last_thought = ""           # the reasoner's note from the prior turn, echoed back for continuity
     last_fp = None              # page fingerprint from the prior step (stagnation detection)
     stagnant = 0                # consecutive steps the page hasn't changed despite acting
-    stagnation_nudges = 0
     budget_warned = False
     acted = False               # did the PRIOR step execute a page action? (gates stagnation)
 
@@ -160,16 +166,14 @@ async def run_subgoal(groq, session, reasoner_tools, subgoal, *, allowlist, appr
             stagnant += 1
         last_fp = fp
         if stagnant >= STAGNATION_LIMIT:
-            if stagnation_nudges < 1:
-                stagnation_nudges += 1
-                stagnant = 0
-                recent_actions.append(
-                    "STAGNANT: the page has NOT changed despite your last few actions — they are "
-                    "having no effect. Do NOT repeat them. Try a DIFFERENT element, navigate "
-                    "directly to a URL, or scroll; if you cannot make progress, escalate.")
-                emit({"type": "stagnation_nudge", "step": step})
-            else:
-                return "escalate", "page stagnant: actions had no visible effect"
+            # Inform-only: tell the reasoner its actions aren't changing the page and let IT decide
+            # (change tactics or escalate). Reset so we nudge again only after another stagnant run.
+            stagnant = 0
+            recent_actions.append(
+                "STAGNANT: the page has NOT changed despite your last few actions — they are having "
+                "no effect. Do NOT repeat them. Try a DIFFERENT element, navigate directly to a URL, "
+                "or scroll; if you genuinely cannot make progress, call escalate.")
+            emit({"type": "stagnation_nudge", "step": step})
 
         # --- step-budget warning: near the end, push the reasoner to land it or escalate ---
         if not budget_warned and step >= max(2, int(max_steps * BUDGET_WARN_FRACTION)):
@@ -220,32 +224,31 @@ async def run_subgoal(groq, session, reasoner_tools, subgoal, *, allowlist, appr
             recent_actions.append(f"subgoal_complete -> REJECTED by verifier: {reason}")
             continue
 
-        # --- loop detection on the action BATCH (the leading action drives the looser name check) ---
-        # Tight: the EXACT same batch two turns running. Loose: the same leading action NAME three
-        # turns running even as args wobble (retrying the same failing click with a tweaked target).
+        # --- loop handling: INFORM the reasoner, with a HIGH anti-runaway BACKSTOP ---
+        # `repeat` counts consecutive IDENTICAL batches (exact same action+args); `name_repeat`
+        # counts the same leading action NAME even as args wobble.
         sig = json.dumps([[n, a] for n, a in actions], sort_keys=True)
         repeat = repeat + 1 if sig == last_sig else 0
         last_sig = sig
         name_repeat = name_repeat + 1 if first_action == last_action else 0
         last_action = first_action
+
+        # BACKSTOP: the exact same action LOOP_HARD_STOP times running is a genuine infinite loop —
+        # force an escalate so a stuck agent can't burn the whole budget. (repeat is 0 on the 1st.)
+        if repeat + 1 >= LOOP_HARD_STOP:
+            return "escalate", f"loop backstop: repeated the exact same action {repeat + 1}x"
+
+        # INFORM: a developing loop just nudges the reasoner (it reads this next turn and decides).
+        # For an EXACT repeat (3rd+ identical), skip executing the redundant action and let it
+        # re-decide; for a loose name-loop (args vary, may still be progress) nudge but let it run.
         if repeat >= 2 or name_repeat >= 3:
-            # First loop in this subgoal: don't throw the whole explore away — NUDGE the reasoner to
-            # change tactics (go straight to a listings URL / use search) and give it another go. On
-            # retail homepages the reasoner often gets stuck re-clicking a menu before it ever reaches
-            # the product grid; cutting out immediately wasted the attempt (the "buy a phone" run).
-            # Escalate only on a SECOND loop, so a genuinely stuck agent still hands back.
-            if loop_nudges < 1:
-                loop_nudges += 1
-                recent_actions.append(
-                    f"LOOP: you repeated {first_action} with no progress. STOP repeating it. Reach the "
-                    f"content a DIFFERENT way — navigate DIRECTLY to a category or search-results URL "
-                    f"(e.g. /search?q=… or a category path), or type your query into the page's search "
-                    f"box and submit. Do not repeat the same action.")
-                repeat = name_repeat = 0
-                last_sig = last_action = None
-                emit({"type": "loop_nudge", "step": step, "action": first_action})
+            recent_actions.append(
+                f"LOOP WARNING: you keep choosing {first_action} with no new progress. Reach the goal "
+                f"a DIFFERENT way — navigate DIRECTLY to a category/search-results URL, use the search "
+                f"box, or pick a different element. If you truly cannot progress, call escalate.")
+            emit({"type": "loop_nudge", "step": step, "action": first_action})
+            if repeat >= 2:  # don't execute a redundant exact repeat — re-decide with the nudge
                 continue
-            return "escalate", f"loop detected: repeated {first_action}"
 
         # --- execute the batch in order, behind the page-change guard (see dom_index) ---
         before_idxs = idxs

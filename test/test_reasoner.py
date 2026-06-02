@@ -276,25 +276,29 @@ async def test_loop_detection_warns_once_before_escalating():
     assert status == "complete"
 
 
-async def test_loop_detection_same_action_varied_args():
-    # Same action NAME with wobbling args (the Amazon failure shape) must still trip the looser
-    # name-based detector — after the one-shot nudge, a persistent name-loop escalates. dom_vary so
-    # the page DOES change each step (isolating the loose loop check from the stagnation guard).
+async def test_loose_loop_is_inform_only():
+    # Same action NAME with wobbling args (varying index) is now INFORM-ONLY: it nudges the reasoner
+    # but does NOT force an escalate (only the exact-repeat backstop does). With the page changing
+    # each step it runs to the step budget rather than being cut off. dom_vary isolates it from
+    # stagnation.
+    events = []
     groq = FakeGroq([reasoner_resp("click_element", f'{{"index": {i}}}') for i in range(8)])
-    status, detail = await _run(groq, FakeSession(dom=_dom_payload(), dom_vary=True),
-                                max_steps=12, read_content=False)
-    assert status == "escalate" and "loop" in detail
+    status, _ = await run_subgoal(groq, FakeSession(dom=_dom_payload(), dom_vary=True), [], SUBGOAL,
+                                  allowlist=set(), approve=lambda p: True, ask=lambda q: "",
+                                  observations=[], max_steps=8, read_content=False, emit=events.append)
+    assert status == "exhausted"
+    assert any(e["type"] == "loop_nudge" for e in events)   # warned, not forced to quit
 
 
-async def test_repeated_rejected_complete_escalates():
-    # The reasoner keeps declaring done; the verifier keeps refusing. Must escalate (not spam
-    # subgoal_complete until the budget drains).
+async def test_repeated_rejected_complete_escalates_at_backstop():
+    # The reasoner keeps declaring done; the verifier keeps refusing. Each refusal is fed back, but
+    # after the high backstop (MAX_COMPLETE_REJECTS) it escalates rather than spinning to the budget.
     scripted = []
-    for _ in range(5):
+    for _ in range(orch.MAX_COMPLETE_REJECTS):
         scripted.append(reasoner_resp("subgoal_complete"))
         scripted.append(content_resp('{"satisfied": false, "reason": "nothing here"}'))
     groq = FakeGroq(scripted)
-    status, detail = await _run(groq, FakeSession(), max_steps=10)
+    status, detail = await _run(groq, FakeSession(), max_steps=orch.MAX_COMPLETE_REJECTS + 4)
     assert status == "escalate" and "refused completion" in detail
 
 
@@ -336,15 +340,18 @@ async def test_page_guard_drops_actions_queued_after_a_navigation():
 
 
 # ----------------------------------------------------------------- robustness (C)
-async def test_stagnation_nudge_then_escalate():
-    # The page never changes but the agent keeps ACTING with DIFFERENT actions (so it's not a loop):
-    # stagnation detection nudges once, then escalates. (FakeSession returns a fixed DOM, so the
-    # page fingerprint is constant no matter the action.)
+async def test_stagnation_is_inform_only():
+    # The page never changes but the agent keeps ACTING with DIFFERENT actions: stagnation now only
+    # NUDGES (the LLM decides) — it is NOT force-escalated. It runs to the step budget instead.
+    # (FakeSession returns a fixed DOM, so the fingerprint is constant no matter the action.)
+    events = []
     acts = [reasoner_resp("click_element", '{"index": 0}') if i % 2 == 0
             else reasoner_resp("select_option", '{"index": 0, "value": "x"}') for i in range(8)]
-    status, detail = await _run(groq := FakeGroq(acts), FakeSession(dom=_dom_payload()),
-                                max_steps=12, read_content=False)
-    assert status == "escalate" and "stagnant" in detail
+    status, _ = await run_subgoal(FakeGroq(acts), FakeSession(dom=_dom_payload()), [], SUBGOAL,
+                                  allowlist=set(), approve=lambda p: True, ask=lambda q: "",
+                                  observations=[], max_steps=8, read_content=False, emit=events.append)
+    assert status == "exhausted"
+    assert any(e["type"] == "stagnation_nudge" for e in events)
 
 
 async def test_budget_warning_emitted_near_end():
