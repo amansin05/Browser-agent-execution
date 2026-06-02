@@ -52,18 +52,26 @@ def _explore_guidance(subgoal) -> str:
     return "### Exploration guidance\n" + " ".join(bits) + "\n" if bits else ""
 
 
-async def reasoner_decide(groq, reasoner_tools, subgoal, snapshot_text, recent_actions, model=MODEL):
-    """One reasoner turn -> (thought, action_name, action_args). Recovers from the Scout
-    tool_use_failed wobble by retrying with a correction (bounded). The reasoner is text-only: when
-    a page's DOM snapshot is too sparse, the orchestrator appends an `### Extracted readable content`
-    block (Readability.js / trafilatura) to `snapshot_text` for it to read — there is no image path."""
-    recent = "\n".join(f"  {i+1}. {a}" for i, a in enumerate(recent_actions[-5:])) or "  (none yet)"
+async def reasoner_decide(groq, reasoner_tools, subgoal, snapshot_text, recent_actions,
+                          last_thought="", model=MODEL):
+    """One reasoner turn -> (thought, actions) where `actions` is an ordered list of (name, args).
+    The model MAY emit several tool calls in one turn (e.g. fill a few fields then submit); the
+    orchestrator executes them in order behind a page-change guard. `thought` is the model's
+    free-text note (its evaluation of the last action + what it's doing now), echoed back next turn
+    via `last_thought` for continuity. Recovers from the Scout tool_use_failed wobble by retrying
+    with a correction (bounded). Text-only: when the page is too sparse, the orchestrator appends an
+    `### Extracted readable content` block to `snapshot_text` — there is no image path."""
+    recent = "\n".join(f"  {i+1}. {a}" for i, a in enumerate(recent_actions[-6:])) or "  (none yet)"
+    note = f"### Your previous note\n{last_thought.strip()}\n\n" if last_thought.strip() else ""
     user = (f"### Current subgoal\n{subgoal['goal']}\n"
             f"Success when: {subgoal['success_condition']}\n"
             f"{_explore_guidance(subgoal)}\n"
             f"### Live page\n{snapshot_text[:9000]}\n\n"
-            f"### Recent actions\n{recent}\n\n"
-            f"Choose exactly ONE action now.")
+            f"{note}### Recent actions\n{recent}\n\n"
+            f"First, briefly evaluate whether your previous action worked and note what to remember. "
+            f"Then choose the next action. You MAY issue SEVERAL actions in this turn ONLY when they "
+            f"are safe to chain on the SAME page (e.g. fill multiple fields, then submit) — the page "
+            f"view refreshes after any navigation/click, so never queue actions past one of those.")
     messages = [{"role": "system", "content": REASONER_SYSTEM}, {"role": "user", "content": user}]
     for _attempt in range(4):
         try:
@@ -75,20 +83,22 @@ async def reasoner_decide(groq, reasoner_tools, subgoal, snapshot_text, recent_a
             detail = (getattr(e, "body", None) or {}).get("error", {}).get("message", str(e))
             log.warning("reasoner tool call rejected (attempt %d/4): %s", _attempt + 1, detail[:160])
             messages.append({"role": "user", "content":
-                             f"Your tool call was rejected: {detail}\nRe-issue ONE call with only "
+                             f"Your tool call was rejected: {detail}\nRe-issue your call(s) with only "
                              "needed params and correct JSON types (booleans/numbers unquoted)."})
             continue
         msg = resp.choices[0].message
         if not msg.tool_calls:
             # No action chosen — nudge once by treating as escalate.
-            return (msg.content or "", "escalate", {"reason": "model returned no action"})
-        tc = msg.tool_calls[0]
-        try:
-            args = json.loads(tc.function.arguments or "{}")
-        except json.JSONDecodeError:
-            log.warning("reasoner returned non-JSON tool args; treating as empty: %.120r",
-                        tc.function.arguments)
-            args = {}
-        return (msg.content or "", tc.function.name, args)
+            return (msg.content or "", [("escalate", {"reason": "model returned no action"})])
+        actions: list[tuple[str, dict]] = []
+        for tc in msg.tool_calls:
+            try:
+                args = json.loads(tc.function.arguments or "{}")
+            except json.JSONDecodeError:
+                log.warning("reasoner returned non-JSON tool args; treating as empty: %.120r",
+                            tc.function.arguments)
+                args = {}
+            actions.append((tc.function.name, args))
+        return (msg.content or "", actions)
     log.warning("reasoner gave up after repeated malformed tool calls")
-    return ("", "escalate", {"reason": "repeated malformed tool calls"})
+    return ("", [("escalate", {"reason": "repeated malformed tool calls"})])

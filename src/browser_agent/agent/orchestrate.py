@@ -8,7 +8,7 @@ tabs.
 import asyncio
 import json
 
-from browser_agent.agent.dom_index import execute_action, index_dom
+from browser_agent.agent.dom_index import execute_action, index_dom, is_terminating
 from browser_agent.agent.extract import extract_candidates, synthesize_options
 from browser_agent.agent.grounding import web_grounding
 from browser_agent.agent.planner import plan_subgoals
@@ -54,6 +54,10 @@ MAX_COMPLETE_REJECTS = 3
 # innerText) so the reasoner has something to read, the same salvage the a11y path used.
 MIN_INTERACTIVE_FOR_TEXT = 3
 
+# The reasoner may emit several actions in one turn; execute at most this many (the page-change
+# guard usually stops a batch sooner). Mirrors browser-use's max_actions_per_step.
+MAX_ACTIONS_PER_STEP = 5
+
 
 async def _approve_with_timeout(approve, prompt: str, timeout: float = APPROVAL_TIMEOUT) -> bool:
     """Await an approval, but treat no-answer-in-time as a denial. Sync (CLI) callbacks aren't
@@ -85,6 +89,7 @@ async def run_subgoal(groq, session, reasoner_tools, subgoal, *, allowlist, appr
     working_tab = None  # the tab the agent drives; we keep focus pinned here across new-tab popups
     previous_keys: set = set()  # interactive-element keys from the last step -> mark NEW ones (*)
     dom = None                  # the current indexed-DOM view (None when we fell back to a11y)
+    last_thought = ""           # the reasoner's note from the prior turn, echoed back for continuity
 
     for step in range(1, max_steps + 1):
         # Keep the agent and the user on the SAME tab. `working_tab` follows the tab a click opened
@@ -121,13 +126,31 @@ async def run_subgoal(groq, session, reasoner_tools, subgoal, *, allowlist, appr
                           step, len(extra))
                 emit({"type": "extract", "step": step, "chars": len(extra)})
                 snapshot_text = f"{snapshot_text}\n\n### Extracted readable content\n{extra[:6000]}"
-        thought, action, args = await reasoner_decide(
-            groq, reasoner_tools, subgoal, snapshot_text, recent_actions, model=model)
-        log.info("step %d: %s(%s) — %s", step, action, json.dumps(args)[:120], thought[:100])
-        emit({"type": "step", "step": step, "thought": thought, "action": action, "args": args})
+        thought, actions = await reasoner_decide(
+            groq, reasoner_tools, subgoal, snapshot_text, recent_actions, last_thought, model=model)
+        last_thought = thought
+        actions = actions[:MAX_ACTIONS_PER_STEP]
+        if not actions:                       # reasoner_decide always returns at least one
+            return "escalate", "model returned no action"
+        first_action = actions[0][0]
+        log.info("step %d: %s%s — %s", step, first_action,
+                 f" (+{len(actions) - 1} more)" if len(actions) > 1 else "", thought[:100])
+        emit({"type": "step", "step": step, "thought": thought,
+              "action": first_action, "args": actions[0][1],
+              "actions": [{"action": n, "args": a} for n, a in actions]})
 
-        # --- synthetic control actions ---
-        if action == "subgoal_complete":
+        # --- a LEADING control action is the whole decision (any trailing actions are ignored) ---
+        # Handled before loop detection so a legitimately repeated complete/ask isn't mistaken for a
+        # navigation loop (the complete-reject standoff guard handles repeated completes instead).
+        if first_action in ("subgoal_complete", "escalate", "ask_human"):
+            _, args = actions[0]
+            if first_action == "escalate":
+                return "escalate", args.get("reason", "escalated")
+            if first_action == "ask_human":
+                answer = await maybe_await(ask(args.get("question", "(no question)")))
+                recent_actions.append(f"ask_human -> {answer!r}")
+                emit({"type": "ask_answer", "answer": answer})
+                continue
             ok, reason = await verify_success(groq, snapshot_text, subgoal["success_condition"], model=model)
             log.info("verifier: satisfied=%s (%s)", ok, reason[:80])
             emit({"type": "verifier", "satisfied": ok, "reason": reason})
@@ -140,43 +163,15 @@ async def run_subgoal(groq, session, reasoner_tools, subgoal, *, allowlist, appr
                 return "escalate", f"verifier refused completion {complete_rejects}x: {reason}"
             recent_actions.append(f"subgoal_complete -> REJECTED by verifier: {reason}")
             continue
-        if action == "escalate":
-            return "escalate", args.get("reason", "escalated")
-        if action == "ask_human":
-            answer = await maybe_await(ask(args.get("question", "(no question)")))
-            recent_actions.append(f"ask_human -> {answer!r}")
-            emit({"type": "ask_answer", "answer": answer})
-            continue
 
-        # --- enforce domain allowlist (only on actions that can change origin) ---
-        # navigate carries the target URL; a click on a link carries it as the element's href.
-        # In-page interactions (type/select/scroll) stay on the current origin, so they're exempt.
-        target_url = None
-        if action == "navigate":
-            target_url = args.get("url", "")
-        elif action == "click_element" and dom is not None:
-            try:
-                el = dom.selector_map.get(int(args.get("index")))
-            except (TypeError, ValueError):
-                el = None
-            if el and el.href.startswith(("http://", "https://")):
-                target_url = el.href
-        if target_url and not domain_allowed(target_url, allowlist):
-            msg = f"blocked by allowlist: {domain_of(target_url)!r} not in {sorted(allowlist)}"
-            log.warning("%s", msg)
-            recent_actions.append(f"{action} -> {msg}")
-            emit({"type": "action_result", "action": action, "blocked": True, "outcome": msg})
-            continue
-
-        # --- loop detection ---
-        # Tight: the EXACT same (action, args) three turns running. Loose: the same action NAME
-        # four turns running even as args wobble (e.g. retrying the same failing click/wait with a
-        # tweaked target/text) — the tight check alone missed this and let the budget drain.
-        sig = (action, json.dumps(args, sort_keys=True))
+        # --- loop detection on the action BATCH (the leading action drives the looser name check) ---
+        # Tight: the EXACT same batch two turns running. Loose: the same leading action NAME three
+        # turns running even as args wobble (retrying the same failing click with a tweaked target).
+        sig = json.dumps([[n, a] for n, a in actions], sort_keys=True)
         repeat = repeat + 1 if sig == last_sig else 0
         last_sig = sig
-        name_repeat = name_repeat + 1 if action == last_action else 0
-        last_action = action
+        name_repeat = name_repeat + 1 if first_action == last_action else 0
+        last_action = first_action
         if repeat >= 2 or name_repeat >= 3:
             # First loop in this subgoal: don't throw the whole explore away — NUDGE the reasoner to
             # change tactics (go straight to a listings URL / use search) and give it another go. On
@@ -186,34 +181,78 @@ async def run_subgoal(groq, session, reasoner_tools, subgoal, *, allowlist, appr
             if loop_nudges < 1:
                 loop_nudges += 1
                 recent_actions.append(
-                    f"LOOP: you repeated {action} with no progress. STOP repeating it. Reach the "
+                    f"LOOP: you repeated {first_action} with no progress. STOP repeating it. Reach the "
                     f"content a DIFFERENT way — navigate DIRECTLY to a category or search-results URL "
                     f"(e.g. /search?q=… or a category path), or type your query into the page's search "
-                    f"box and submit. Do not click the same element again.")
+                    f"box and submit. Do not repeat the same action.")
                 repeat = name_repeat = 0
                 last_sig = last_action = None
-                emit({"type": "loop_nudge", "step": step, "action": action})
+                emit({"type": "loop_nudge", "step": step, "action": first_action})
                 continue
-            return "escalate", f"loop detected: repeated {action}"
+            return "escalate", f"loop detected: repeated {first_action}"
 
-        # --- execute: index-addressed in-page action, or MCP navigation/key (see dom_index) ---
+        # --- execute the batch in order, behind the page-change guard (see dom_index) ---
         before_idxs = idxs
-        res = await execute_action(session, action, args)
-        rtext = res["outcome"]
-        # If the action opened a new tab (e.g. a result that opens in its own tab), FOLLOW it:
-        # adopt it as the working tab and make it active, so the agent works on the same tab the
-        # user is now looking at instead of being stranded on the opener.
-        cur2, idxs2 = await list_tabs_state(session)
-        adopt = newest_new_tab(before_idxs, idxs2)
-        if adopt is not None:
-            working_tab = adopt
-            if cur2 != adopt:
-                await select_tab(session, adopt)
-            rtext += " (note: a new tab opened — followed it)"
-        outcome = rtext[:150].replace("\n", " ")
-        log.debug("step %d result: %s", step, outcome)
-        recent_actions.append(f"{action}({json.dumps(args)[:60]}) -> {outcome}")
-        emit({"type": "action_result", "action": action, "outcome": outcome, "ok": res["ok"]})
+        for action, args in actions:
+            # A control action reached mid-batch (e.g. [scroll, subgoal_complete]) ends the turn.
+            if action == "escalate":
+                return "escalate", args.get("reason", "escalated")
+            if action == "ask_human":
+                answer = await maybe_await(ask(args.get("question", "(no question)")))
+                recent_actions.append(f"ask_human -> {answer!r}")
+                emit({"type": "ask_answer", "answer": answer})
+                break
+            if action == "subgoal_complete":
+                ok, reason = await verify_success(groq, snapshot_text, subgoal["success_condition"], model=model)
+                emit({"type": "verifier", "satisfied": ok, "reason": reason})
+                if ok:
+                    return "complete", reason
+                complete_rejects += 1
+                if complete_rejects >= MAX_COMPLETE_REJECTS:
+                    return "escalate", f"verifier refused completion {complete_rejects}x: {reason}"
+                recent_actions.append(f"subgoal_complete -> REJECTED by verifier: {reason}")
+                break
+
+            # enforce the domain allowlist (only navigate / a link click can change origin)
+            target_url = None
+            if action == "navigate":
+                target_url = args.get("url", "")
+            elif action == "click_element" and dom is not None:
+                try:
+                    el = dom.selector_map.get(int(args.get("index")))
+                except (TypeError, ValueError):
+                    el = None
+                if el and el.href.startswith(("http://", "https://")):
+                    target_url = el.href
+            if target_url and not domain_allowed(target_url, allowlist):
+                msg = f"blocked by allowlist: {domain_of(target_url)!r} not in {sorted(allowlist)}"
+                log.warning("%s", msg)
+                recent_actions.append(f"{action} -> {msg}")
+                emit({"type": "action_result", "action": action, "blocked": True, "outcome": msg})
+                break  # a blocked navigation ends the batch
+
+            res = await execute_action(session, action, args)
+            rtext = res["outcome"]
+            # FOLLOW a new tab the action opened (adopt + activate) so the agent works on the tab the
+            # user is now looking at instead of being stranded on the opener.
+            cur2, idxs2 = await list_tabs_state(session)
+            adopt = newest_new_tab(before_idxs, idxs2)
+            new_tab_opened = adopt is not None
+            if new_tab_opened:
+                working_tab = adopt
+                if cur2 != adopt:
+                    await select_tab(session, adopt)
+                rtext += " (note: a new tab opened — followed it)"
+            before_idxs = idxs2
+            outcome = rtext[:150].replace("\n", " ")
+            log.debug("step %d result: %s(%s) -> %s", step, action, json.dumps(args)[:60], outcome)
+            recent_actions.append(f"{action}({json.dumps(args)[:60]}) -> {outcome}")
+            emit({"type": "action_result", "action": action, "outcome": outcome, "ok": res["ok"]})
+
+            # PAGE GUARD: stop after any action that may have changed the page (navigation, click,
+            # submit) or that opened a new tab — re-perceive next step rather than act on a stale view.
+            if new_tab_opened or is_terminating(action, args):
+                break
 
     return "exhausted", "step budget exhausted"
 

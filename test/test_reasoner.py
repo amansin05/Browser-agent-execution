@@ -26,6 +26,12 @@ def reasoner_resp(name, arguments="{}", thought="thinking"):
     return NS(choices=[NS(message=NS(content=thought, tool_calls=[make_tc(name, arguments)]))])
 
 
+def reasoner_multi(calls, thought="thinking"):
+    """A reasoner response with SEVERAL tool_calls in one turn (calls = [(name, arguments_json), ...])."""
+    return NS(choices=[NS(message=NS(content=thought,
+                                     tool_calls=[make_tc(n, a) for n, a in calls]))])
+
+
 def content_resp(text):
     return NS(choices=[NS(message=NS(content=text, tool_calls=None))])
 
@@ -179,25 +185,41 @@ async def test_verify_malformed():
 
 
 # ----------------------------------------------------------------- reasoner_decide (one turn)
-async def test_reasoner_decide_returns_single_action():
+async def test_reasoner_decide_returns_action_list():
     groq = FakeGroq([reasoner_resp("click_element", '{"index": 3}', thought="clicking")])
-    thought, action, args = await reasoner_decide(groq, [], SUBGOAL, "snapshot", [])
-    assert action == "click_element" and args == {"index": 3} and thought == "clicking"
+    thought, actions = await reasoner_decide(groq, [], SUBGOAL, "snapshot", [])
+    assert actions == [("click_element", {"index": 3})] and thought == "clicking"
+
+
+async def test_reasoner_decide_returns_multiple_actions():
+    # The model may chain several tool calls in one turn; reasoner_decide returns them in order.
+    groq = FakeGroq([reasoner_multi([("input_text", '{"index": 0, "text": "hi"}'),
+                                     ("click_element", '{"index": 1}')])])
+    _, actions = await reasoner_decide(groq, [], SUBGOAL, "snapshot", [])
+    assert actions == [("input_text", {"index": 0, "text": "hi"}), ("click_element", {"index": 1})]
 
 
 async def test_reasoner_decide_recovers_from_bad_request():
     # Scout's tool_use_failed wobble: a BadRequestError, then a valid call on the retry.
     groq = FakeGroq([_bad_request(), reasoner_resp("navigate", '{"url": "http://x"}')])
-    _, action, args = await reasoner_decide(groq, [], SUBGOAL, "snapshot", [])
-    assert action == "navigate" and args == {"url": "http://x"}
+    _, actions = await reasoner_decide(groq, [], SUBGOAL, "snapshot", [])
+    assert actions == [("navigate", {"url": "http://x"})]
     # The retry turn fed the rejection back to the model.
     assert any("rejected" in m["content"] for m in groq.calls[1]["messages"] if m["role"] == "user")
 
 
 async def test_reasoner_decide_no_tool_call_escalates():
     groq = FakeGroq([content_resp("I am unsure")])
-    _, action, _ = await reasoner_decide(groq, [], SUBGOAL, "snapshot", [])
-    assert action == "escalate"
+    _, actions = await reasoner_decide(groq, [], SUBGOAL, "snapshot", [])
+    assert actions[0][0] == "escalate"
+
+
+async def test_reasoner_decide_echoes_previous_thought():
+    # The prior turn's note is fed back for continuity.
+    groq = FakeGroq([reasoner_resp("scroll_page", '{"direction": "down"}')])
+    await reasoner_decide(groq, [], SUBGOAL, "snapshot", [], last_thought="I just searched")
+    prompt = groq.calls[0]["messages"][1]["content"]
+    assert "Your previous note" in prompt and "I just searched" in prompt
 
 
 # ----------------------------------------------------------------- run_subgoal loop branches
@@ -271,6 +293,36 @@ async def test_step_budget_exhausted():
                      reasoner_resp("scroll_page", '{"direction": "down"}')])
     status, _ = await _run(groq, FakeSession(dom=_dom_payload()), max_steps=2, read_content=False)
     assert status == "exhausted"
+
+
+# ----------------------------------------------------------------- multi-action + page guard
+async def test_multi_action_batch_runs_chained_actions_in_one_step():
+    # Two chainable inputs + a terminating click, all in ONE turn -> all three execute this step.
+    groq = FakeGroq([reasoner_multi([("input_text", '{"index": 0, "text": "a"}'),
+                                     ("input_text", '{"index": 1, "text": "b"}'),
+                                     ("click_element", '{"index": 2}')]),
+                     reasoner_resp("subgoal_complete"),
+                     content_resp('{"satisfied": true, "reason": "ok"}')])
+    sess = FakeSession(dom=_dom_payload())
+    status, _ = await _run(groq, sess, max_steps=5, read_content=False)
+    assert status == "complete"
+    fns = [a.get("function", "") for n, a in sess.calls if n == "browser_evaluate"]
+    assert sum("HTMLInputElement.prototype" in f for f in fns) == 2   # two input_text setters
+    assert sum("el.click()" in f for f in fns) == 1                   # one click
+
+
+async def test_page_guard_drops_actions_queued_after_a_navigation():
+    # navigate is terminating: a click queued after it must NOT run this step (the view is now stale).
+    groq = FakeGroq([reasoner_multi([("navigate", '{"url": "http://test.local/list"}'),
+                                     ("click_element", '{"index": 0}')]),
+                     reasoner_resp("subgoal_complete"),
+                     content_resp('{"satisfied": true, "reason": "ok"}')])
+    sess = FakeSession(dom=_dom_payload())
+    status, _ = await _run(groq, sess, max_steps=5, read_content=False)
+    assert status == "complete"
+    assert ("browser_navigate", {"url": "http://test.local/list"}) in sess.calls
+    fns = [a.get("function", "") for n, a in sess.calls if n == "browser_evaluate"]
+    assert not any("el.click()" in f for f in fns)                   # the queued click was dropped
 
 
 async def test_explore_spec_reaches_reasoner_prompt():

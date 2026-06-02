@@ -369,6 +369,19 @@ INTERACTION_ACTIONS = {"click_element", "input_text", "select_option", "scroll_p
 MCP_ACTIONS = {"navigate", "go_back", "press_key"}
 REASONER_ACTION_NAMES = INTERACTION_ACTIONS | MCP_ACTIONS
 
+# The page-change guard for multi-action turns (browser-use's "terminates_sequence"): only these
+# actions are safe to CHAIN, because they leave you on the same page with the same elements. Any
+# other action (a click, a navigation, a key press, or an input that submits) may change the page,
+# so it ENDS the batch — the next step re-perceives before acting again, never against a stale view.
+CHAINABLE_ACTIONS = {"select_option", "scroll_page"}
+
+
+def is_terminating(action: str, args: dict) -> bool:
+    """True if `action` may change the page and so must end a multi-action batch."""
+    if action == "input_text":
+        return bool(args.get("submit"))  # typing is chainable; pressing Enter (submit) navigates
+    return action not in CHAINABLE_ACTIONS
+
 
 def _mcp_outcome(res) -> dict:
     txt = tool_result_to_text(res)
