@@ -264,6 +264,29 @@ body {
   display: inline-block; animation: spin .8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
+/* ---------------- actors (multi-agent stream, nanobrowser-style) ---------------- */
+.block { margin: 10px 0; }
+.actor { display: inline-flex; align-items: center; gap: 6px; margin-bottom: 5px; }
+.actor-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; flex: none; }
+.actor-name { font-size: 11.5px; font-weight: 700; letter-spacing: .02em; }
+
+.sysnote { font-size: 13px; color: var(--ink-soft); background: #f4f7fb; border: 1px solid #dbe6f2;
+  border-left: 3px solid #2f6fb0; border-radius: 0 8px 8px 0; padding: 8px 11px; line-height: 1.5; }
+.sysnote-body { color: var(--muted); font-size: 12px; margin-top: 4px; white-space: pre-wrap; word-break: break-word; }
+.sysnote-warn { background: #fbf4e3; border-color: #ecd9a8; border-left-color: var(--warn); }
+.cand-list { margin: 6px 0 0; padding-left: 18px; line-height: 1.6; color: var(--ink-soft); }
+.cand-top { margin-top: 4px; font-weight: 600; color: var(--ok); }
+.present { background: #fbf8f3; border: 1px solid var(--line); border-radius: 11px; padding: 12px 14px;
+  line-height: 1.55; white-space: pre-wrap; word-break: break-word; }
+.step-n-cont { background: none; color: var(--accent); }
+
+/* transient progress bar — the next real message replaces it */
+.progress { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
+.progress-bar { flex: 1; height: 3px; border-radius: 3px; background: #ece6dd; overflow: hidden; position: relative; }
+.progress-fill { position: absolute; top: 0; bottom: 0; width: 40%; border-radius: 3px;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent); animation: slide 1.1s ease-in-out infinite; }
+@keyframes slide { 0% { left: -40%; } 100% { left: 100%; } }
+
 /* scrollbars */
 .recents::-webkit-scrollbar, .thread::-webkit-scrollbar, .hero::-webkit-scrollbar { width: 10px; }
 .recents::-webkit-scrollbar-thumb, .thread::-webkit-scrollbar-thumb, .hero::-webkit-scrollbar-thumb {

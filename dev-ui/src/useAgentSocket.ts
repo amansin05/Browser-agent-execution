@@ -55,11 +55,12 @@ function applyEvent(run: Run, ev: AgentEvent): Run {
       break;
     case "grounding":
       run.grounding = ev.text;
+      run.items.push({ kind: "grounding", text: ev.text });
       break;
     case "step": {
       const sg = ensureContainer(run);
       const step: Step = {
-        n: ev.step, thought: ev.thought, action: ev.action, args: ev.args,
+        n: ev.step, thought: ev.thought, action: ev.action, args: ev.args, actions: ev.actions,
         extract: run.pendingExtract || false,
       };
       run.pendingExtract = false;
@@ -69,9 +70,31 @@ function applyEvent(run: Run, ev: AgentEvent): Run {
     case "action_result": {
       const sg = lastSubgoal(run);
       const step = sg?.steps[sg.steps.length - 1];
-      if (step) { step.result = ev.outcome; step.blocked = ev.blocked; }
+      if (step) { step.result = ev.outcome; step.blocked = ev.blocked; step.ok = ev.ok; }
       break;
     }
+    case "candidates":
+      run.items.push({ kind: "candidates", count: ev.count, total: ev.total,
+                       items: ev.candidates || [], blocked: ev.blocked, source: ev.source });
+      break;
+    case "exploit":
+      run.items.push({ kind: "exploit", selected: ev.selected, top: ev.top || [], nearTie: ev.near_tie });
+      break;
+    case "present":
+      run.items.push({ kind: "present", markdown: ev.markdown });
+      break;
+    case "loop_nudge":
+      run.items.push({ kind: "note", tone: "warn",
+                       text: `Loop detected on ${ev.action} — nudged to change tactics.` });
+      break;
+    case "stagnation_nudge":
+      run.items.push({ kind: "note", tone: "warn",
+                       text: "Page isn't changing — nudged to try a different approach." });
+      break;
+    case "budget_warning":
+      run.items.push({ kind: "note", tone: "warn",
+                       text: `Step budget ${ev.step}/${ev.max_steps} — time to wrap up or escalate.` });
+      break;
     case "verifier": {
       const sg = lastSubgoal(run);
       if (sg) sg.verifiers.push({ satisfied: ev.satisfied, reason: ev.reason });

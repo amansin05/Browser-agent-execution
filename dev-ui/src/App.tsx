@@ -242,6 +242,28 @@ function Composer(props: {
   );
 }
 
+/* ------------------------------------------------------------------ actors */
+// Each part of the run is attributed to an "actor" (nanobrowser-style), so you can see WHICH agent
+// is thinking/acting in the stream — Planner decides the plan, Navigator drives the page, Verifier
+// checks success, System reports grounding/candidates/results.
+type Actor = "system" | "planner" | "navigator" | "verifier";
+const ACTORS: Record<Actor, { name: string; color: string }> = {
+  system: { name: "System", color: "#2f6fb0" },
+  planner: { name: "Planner", color: "#c2620e" },
+  navigator: { name: "Navigator", color: "#2a9d8f" },
+  verifier: { name: "Verifier", color: "#b5478f" },
+};
+
+function ActorTag({ actor }: { actor: Actor }) {
+  const a = ACTORS[actor];
+  return (
+    <span className="actor">
+      <span className="actor-dot" style={{ background: a.color }} />
+      <span className="actor-name" style={{ color: a.color }}>{a.name}</span>
+    </span>
+  );
+}
+
 /* ------------------------------------------------------------------ run thread */
 function RunView({ run, onApprove }: {
   run: Run; onApprove: (id: number, ok: boolean) => void;
@@ -273,38 +295,136 @@ function RunView({ run, onApprove }: {
             <div className="result err"><div className="result-label">Error</div>{run.error}</div>}
           {run.status === "cancelled" &&
             <div className="result warn"><div className="result-label">Cancelled</div>Run cancelled.</div>}
-          {run.status === "running" && <div className="working"><span className="spinner" /> working…</div>}
+          {run.status === "running" && !run.approval && !run.ask && <ProgressLine run={run} />}
         </div>
       </div>
     </div>
   );
 }
 
+// A transient progress bar attributed to whichever actor is currently working (nanobrowser shows an
+// animated bar that the next real message replaces). We infer the actor from the latest timeline item.
+function ProgressLine({ run }: { run: Run }) {
+  const last = run.items[run.items.length - 1];
+  const actor: Actor =
+    !last ? "system"
+    : last.kind === "plan" || last.kind === "replan" ? "planner"
+    : last.kind === "subgoal" ? "navigator"
+    : "system";
+  const a = ACTORS[actor];
+  return (
+    <div className="progress">
+      <span className="actor-dot" style={{ background: a.color }} />
+      <span className="actor-name" style={{ color: a.color }}>{a.name}</span>
+      <span className="progress-bar"><span className="progress-fill" /></span>
+    </div>
+  );
+}
+
 function TimelineItemView({ item }: { item: TimelineItem }) {
-  if (item.kind === "plan") {
-    return (
-      <div className="plan">
-        <div className="block-label">Plan</div>
-        <ol className="plan-list">
-          {item.subgoals.map((s) => (
-            <li key={s.id}>{s.goal}{s.needs_approval && <span className="chip warn">needs approval</span>}
-              <div className="plan-success">✓ {s.success_condition}</div></li>
-          ))}
-        </ol>
-      </div>
-    );
+  switch (item.kind) {
+    case "plan":
+      return (
+        <div className="block">
+          <ActorTag actor="planner" />
+          <div className="plan">
+            <ol className="plan-list">
+              {item.subgoals.map((s) => (
+                <li key={s.id}>{s.goal}{s.needs_approval && <span className="chip warn">needs approval</span>}
+                  <div className="plan-success">✓ {s.success_condition}</div></li>
+              ))}
+            </ol>
+          </div>
+        </div>
+      );
+    case "replan":
+      return (
+        <div className="block">
+          <ActorTag actor="planner" />
+          <div className="replan">↻ Re-plan #{item.n} — {item.reason}</div>
+        </div>
+      );
+    case "grounding":
+      return (
+        <div className="block">
+          <ActorTag actor="system" />
+          <div className="sysnote"><b>Web grounding</b>
+            <div className="sysnote-body">{shorten(item.text, 600)}</div></div>
+        </div>
+      );
+    case "candidates":
+      return (
+        <div className="block">
+          <ActorTag actor="system" />
+          <div className={`sysnote ${item.count === 0 ? "sysnote-warn" : ""}`}>
+            {item.count > 0 ? (
+              <>
+                <b>Gathered {item.count} candidate{item.count === 1 ? "" : "s"}</b>
+                {item.total ? ` (${item.total} total)` : ""}{item.source ? ` from ${item.source}` : ""}
+                <ul className="cand-list">
+                  {item.items.slice(0, 5).map((c, i) => <li key={i}>{candLabel(c)}</li>)}
+                </ul>
+              </>
+            ) : (
+              <><b>No candidates</b>{item.source ? ` from ${item.source}` : ""}
+                {item.blocked ? " — page looked blocked" : ""}</>
+            )}
+          </div>
+        </div>
+      );
+    case "exploit":
+      return (
+        <div className="block">
+          <ActorTag actor="system" />
+          <div className="sysnote">
+            <b>Ranked picks</b>{item.nearTie && <span className="chip warn">near tie</span>}
+            {item.selected
+              ? <div className="cand-top">★ {candLabel(item.selected)}</div>
+              : <div>no candidates to rank</div>}
+          </div>
+        </div>
+      );
+    case "present":
+      return (
+        <div className="block">
+          <ActorTag actor="system" />
+          <div className="present">{item.markdown}</div>
+        </div>
+      );
+    case "note":
+      return (
+        <div className="block">
+          <ActorTag actor="system" />
+          <div className={`sysnote ${item.tone === "warn" ? "sysnote-warn" : ""}`}>{item.text}</div>
+        </div>
+      );
+    case "tabs": {
+      const verb = item.mode === "parked" ? "Parked & closed" : "Reopened for follow-up";
+      const n = item.urls.length;
+      return (
+        <div className="block">
+          <ActorTag actor="system" />
+          <div className="sysnote" title={item.urls.join("\n")}>
+            ⧉ {verb} {n} tab{n === 1 ? "" : "s"} — {item.urls.join(", ")}
+          </div>
+        </div>
+      );
+    }
+    default:  // SubgoalCard — the Navigator working a subgoal
+      return (
+        <div className="block">
+          <ActorTag actor="navigator" />
+          <SubgoalView sg={item} />
+        </div>
+      );
   }
-  if (item.kind === "replan") return <div className="replan">↻ Re-plan #{item.n} — {item.reason}</div>;
-  if (item.kind === "tabs") {
-    const verb = item.mode === "parked" ? "Parked & closed" : "Reopened for follow-up";
-    const n = item.urls.length;
-    return (
-      <div className="replan" title={item.urls.join("\n")}>
-        ⧉ {verb} {n} tab{n === 1 ? "" : "s"} — {item.urls.join(", ")}
-      </div>
-    );
-  }
-  return <SubgoalView sg={item} />;
+}
+
+function candLabel(c: Record<string, unknown>): string {
+  const name = String(c.name ?? c.title ?? c.model ?? "item");
+  const price = c.price != null ? ` — ${c.price}` : "";
+  const src = c.source != null ? ` (${c.source})` : "";
+  return `${name}${price}${src}`;
 }
 
 function SubgoalView({ sg }: { sg: SubgoalCard }) {
@@ -320,7 +440,8 @@ function SubgoalView({ sg }: { sg: SubgoalCard }) {
       {sg.steps.map((s, i) => <StepView key={i} step={s} />)}
       {sg.verifiers.map((v, i) => (
         <div key={`v${i}`} className={`verifier ${v.satisfied ? "ok" : "no"}`}>
-          verifier: {v.satisfied ? "satisfied" : "not satisfied"} — {v.reason}
+          <span className="actor-name" style={{ color: ACTORS.verifier.color }}>Verifier</span>
+          {" "}{v.satisfied ? "satisfied" : "not satisfied"} — {v.reason}
         </div>
       ))}
     </div>
@@ -328,16 +449,21 @@ function SubgoalView({ sg }: { sg: SubgoalCard }) {
 }
 
 function StepView({ step }: { step: Step }) {
+  // A turn may chain several actions (multi-action); render each, with the thought above them.
+  const acts = step.actions && step.actions.length ? step.actions : [{ action: step.action, args: step.args }];
   return (
     <div className="step">
-      <div className="step-line">
-        {step.n > 0 && <span className="step-n">{step.n}</span>}
-        <span className="action">{step.action}</span>
-        <span className="args">{shorten(JSON.stringify(step.args), 120)}</span>
-        {step.extract && <span className="chip extract">extract</span>}
-        {step.blocked && <span className="chip blocked">blocked</span>}
-      </div>
       {step.thought && <div className="thought">{step.thought}</div>}
+      {acts.map((a, i) => (
+        <div className="step-line" key={i}>
+          {i === 0 && step.n > 0 && <span className="step-n">{step.n}</span>}
+          {i > 0 && <span className="step-n step-n-cont">↳</span>}
+          <span className="action">{a.action}</span>
+          <span className="args">{shorten(JSON.stringify(a.args), 120)}</span>
+          {i === 0 && step.extract && <span className="chip extract">extract</span>}
+          {i === 0 && step.blocked && <span className="chip blocked">blocked</span>}
+        </div>
+      ))}
       {step.result && <div className="step-result">{shorten(step.result, 260)}</div>}
     </div>
   );
