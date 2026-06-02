@@ -43,12 +43,15 @@ def _explore_guidance(subgoal) -> str:
     target = spec.get("target_count")
     if target:
         bits.append(f"Aim for about {target} candidates.")
-    # The biggest explore failure mode is never finishing: the reasoner keeps applying filters /
-    # clicking around a results page and never signals done, so the candidate extractor (which runs
-    # AFTER completion) never fires. Tell it to stop and complete as soon as a list is visible.
+    # The biggest explore failure mode is never finishing: the reasoner keeps scrolling / filtering
+    # a results page and never signals done, so the candidate extractor (which runs AFTER completion)
+    # never fires — and every scroll is wasted because extraction reads the WHOLE page (including
+    # off-screen items), not just what's in view. Tell it to complete the instant a list is visible.
     bits.append("As SOON as the page shows a list of results/listings matching the goal, call "
-                "subgoal_complete — do NOT keep applying filters, sorting, or clicking; the "
-                "candidates are read off the page automatically once you complete.")
+                "subgoal_complete IMMEDIATELY — do NOT scroll, filter, sort, or click to 'gather' "
+                "more. Scrolling does NOT help: the candidates (including off-screen ones) are read "
+                "off the full page automatically the moment you complete. One scroll at most if the "
+                "list isn't visible yet, then complete.")
     return "### Exploration guidance\n" + " ".join(bits) + "\n" if bits else ""
 
 

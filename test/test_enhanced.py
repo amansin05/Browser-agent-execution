@@ -34,6 +34,29 @@ def test_score_empty_and_near_tie():
     assert is_near_tie(tie) is True
 
 
+def test_zero_price_is_not_treated_as_cheapest():
+    # A 0.00 price means "unknown", not "free/best" — it must NOT win a price-weighted ranking
+    # (the "INR 0.00 book won" bug). With real prices present it scores neutrally (~mean).
+    cands = [
+        {"name": "junk", "price": 0, "rating": 4.6},
+        {"name": "cheap", "price": 50, "rating": 4.0},
+        {"name": "mid", "price": 100, "rating": 4.2},
+    ]
+    ranked = score_candidates(cands, {"price": 1.0})
+    assert ranked[0]["name"] == "cheap"          # the real cheapest, not the 0.00 item
+    assert ranked[0]["name"] != "junk"
+
+
+def test_rating_dominant_weights_rank_by_rating_not_price():
+    # With no price preference -> rating-dominant weights: the best-reviewed wins even if pricier.
+    cands = [
+        {"name": "A", "price": 50, "rating": 3.9, "review_count": 10},
+        {"name": "B", "price": 300, "rating": 4.8, "review_count": 900},
+    ]
+    ranked = score_candidates(cands, {"rating": 0.6, "review_count": 0.2, "price": 0.2})
+    assert ranked[0]["name"] == "B"
+
+
 # ----------------------------------------------------------------- context (B1)
 def test_basic_context_shape():
     ctx = build_basic_context()

@@ -115,10 +115,15 @@ Subgoal types you may emit:
 - "act"      : a concrete browser milestone (search, fill, add-to-cart, submit, ...).
 - "explore"  : gather candidate options (the reasoner browses). Include an "explore_spec":
                {{"target_count": <int>, "must_have": [..], "gather_fields": [.., "source"],
-                 "sources": ["site1", "site2", ...]}}. Always include "source" in gather_fields.
+                 "sources": ["site1", "site2", ...]}}. ALWAYS include "source", "rating", and
+                 "review_count" in gather_fields (plus "price" when relevant) — rating is what we
+                 recommend on when the user has no other preference.
 - "exploit"  : select among gathered candidates. Include "scoring": {{"weights": {{field: w}}}}
                derived from the user's preferences. A deterministic scorer (NOT the reasoner)
-               picks the winner.
+               picks the winner. ALWAYS weight "rating", and when the user gave NO price/budget or
+               delivery preference, make rating DOMINANT (e.g. {{"rating": 0.6, "review_count": 0.2,
+                 "price": 0.2}}). Never rank on price/delivery alone — that surfaces cheap junk over
+               well-reviewed picks.
 - "present"  : synthesize the gathered candidates into a structured markdown shortlist for the
                user (a few finalists with pros/cons, price, key specs, and any offers, plus a
                recommendation). Use this as the FINAL step of a research/shopping goal that
@@ -204,6 +209,11 @@ list is the correct, expected answer when nothing is on the page — never pad i
 products from your own knowledge. Include a candidate only if its required must-have fields are \
 actually present in the snapshot.
 
+PRICES & RATINGS — use null, never a placeholder. If a price isn't clearly shown for an item, set \
+"price": null — do NOT write 0 or 0.00 (a 0 price reads as "free/cheapest" and corrupts ranking). \
+Likewise set "rating"/"review_count" to null when not shown. Prefer items that DO show a price and \
+rating. Copy the rating as a number (e.g. 4.6) and review_count as an integer when present.
+
 Respond with ONLY valid JSON: {"candidates": [ {<field>: <value>, ...}, ... ]}"""
 
 # Present (synthesis): turn gathered candidates into a structured markdown shortlist for the user.
@@ -213,12 +223,16 @@ several sources (each with a "source"), plus the scorer's top pick.
 
 Write GitHub-flavored markdown (no JSON, no code fences around the whole thing):
 - A one-line summary of what you compared and across which sources.
-- 2-5 finalists, each as its own subsection with: name, price, the source/site, a few key specs,
-  **Pros** and **Cons** bullet lists, and any **Offers**/discounts you saw (omit if none).
-- End with a short **Recommendation** naming the best pick for this user and WHY (tie it to their
-  stated budget/brand/preferences), and mention a runner-up.
-Only use facts present in the candidates — never invent specs, prices, or offers. If a field is \
-missing, say so briefly rather than guessing. Keep it skimmable."""
+- 2-5 finalists ORDERED BEST-FIRST. When the user gave no budget/price preference, lead with the
+  HIGHEST-RATED options and make each item's **rating + number of reviews** the headline, then key
+  highlights — do NOT lead with whichever is cheapest. Each finalist is its own subsection with:
+  name, rating (and review count), price (write "price not listed" if it's null/missing — never
+  show 0), the source/site, a few key highlights/specs, **Pros**/**Cons**, and any **Offers**.
+- End with a short **Recommendation** naming the best pick and WHY (tie it to rating/reviews, and to
+  any stated budget/brand/preference), and mention a runner-up.
+Only use facts present in the candidates — never invent specs, prices, ratings, or offers. Skip any
+item whose price shows as 0/0.00 unless it genuinely is free. If a field is missing, say so briefly
+rather than guessing. Keep it skimmable."""
 
 # Reflection / memory-update (B2): summarize the finished task into an episode + preference signals.
 REFLECT_SYSTEM = """You write a short memory record after a browser task finishes. From the task, \

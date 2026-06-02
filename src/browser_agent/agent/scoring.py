@@ -7,6 +7,11 @@ preference-weighted rubric, because models pick poorly from a known set. Pure + 
 # Fields where a smaller value is better (so we invert them when normalizing).
 LOWER_IS_BETTER = {"price", "delivery_days", "cost", "eta_days", "distance"}
 
+# Fields where a value of 0 (or negative) means MISSING, not "best". A 0.00 price is almost always
+# an unparsed/sponsored/Kindle row — treating it as the cheapest is what made an "INR 0.00" book win
+# the ranking. We map such zeros to None so they score neutrally instead of best.
+ZERO_IS_MISSING = {"price", "cost", "mrp"}
+
 
 def _to_number(v):
     if isinstance(v, (int, float)) and not isinstance(v, bool):
@@ -42,6 +47,8 @@ def score_candidates(candidates: list[dict], weights: dict[str, float],
     norm_by_field: dict[str, list[float]] = {}
     for f in fields:
         nums = [_to_number(c.get(f)) for c in candidates]
+        if f in ZERO_IS_MISSING:  # a 0/negative price means "unknown", not "free/best"
+            nums = [None if (n is not None and n <= 0) else n for n in nums]
         present = [n for n in nums if n is not None]
         if not present:
             continue
