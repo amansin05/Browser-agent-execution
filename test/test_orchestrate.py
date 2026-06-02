@@ -223,3 +223,28 @@ async def test_synthesize_uses_composition_model():
     g = RecordingGroq("## Shortlist")
     await synthesize_options(g, "buy a phone", [{"name": "P", "source": "x"}])
     assert g.model == cfg.COMPOSITION_MODEL
+
+
+# ----------------------------------------------------------------- LLM-based selection (exploit)
+async def test_select_candidates_uses_llm_pick():
+    from browser_agent.agent.extract import select_candidates
+    g = RecordingGroq('{"top": [2, 0], "reason": "best rated"}')
+    cands = [{"name": "A"}, {"name": "B"}, {"name": "C"}]
+    out = await select_candidates(g, "buy a book", cands)
+    assert out["selected"] == {"name": "C"}                       # index 2, best-first
+    assert [c["name"] for c in out["top"]] == ["C", "A"]
+    assert out["reason"] == "best rated"
+
+
+async def test_select_candidates_falls_back_to_scorer_on_bad_json():
+    from browser_agent.agent.extract import select_candidates
+    g = RecordingGroq("not json at all")                          # LLM reply unparseable
+    cands = [{"name": "A", "rating": 4.0}, {"name": "B", "rating": 4.9}]
+    out = await select_candidates(g, "buy a book", cands)
+    assert out["selected"]["name"] == "B"                         # rating-dominant fallback picks B
+
+
+async def test_select_candidates_empty():
+    from browser_agent.agent.extract import select_candidates
+    out = await select_candidates(None, "x", [])
+    assert out["selected"] is None and out["top"] == []

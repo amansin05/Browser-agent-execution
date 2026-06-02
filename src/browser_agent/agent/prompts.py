@@ -216,6 +216,20 @@ rating. Copy the rating as a number (e.g. 4.6) and review_count as an integer wh
 
 Respond with ONLY valid JSON: {"candidates": [ {<field>: <value>, ...}, ... ]}"""
 
+# Exploit (selection): the LLM picks the best candidates from the gathered set (replaces the old
+# deterministic scorer as the decider — keeping the choice with the model, not a fixed rubric).
+SELECTOR_SYSTEM = """You SELECT and RANK the best options from a gathered candidate list for the \
+user's goal. You are given the goal and a JSON array of candidates (0-indexed), each with fields \
+like name, price, rating, review_count, source.
+
+Rank by what matters for THIS goal: when the user gave NO budget/price preference, prioritize the \
+HIGHEST-RATED, well-reviewed options; otherwise respect their stated preference (budget, brand, \
+size, dates, ...). Treat a missing or 0 price as "price unknown" — never as the cheapest/best. \
+Choose ONLY from the candidates given, by their index; never invent items or fields.
+
+Respond with ONLY valid JSON: {"top": [<index>, ...best first, up to the limit], "reason": "<one \
+short line on why the top pick wins>"} — indices are 0-based positions in the candidates array."""
+
 # Present (synthesis): turn gathered candidates into a structured markdown shortlist for the user.
 SYNTHESIZER_SYSTEM = """You present shopping/research findings to the user as a clear, structured \
 markdown shortlist. You are given the user's goal and a list of candidate options gathered from \

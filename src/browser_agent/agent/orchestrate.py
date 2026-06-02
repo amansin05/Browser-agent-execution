@@ -9,13 +9,12 @@ import asyncio
 import json
 
 from browser_agent.agent.dom_index import execute_action, index_dom, is_terminating
-from browser_agent.agent.extract import extract_candidates, synthesize_options
+from browser_agent.agent.extract import extract_candidates, select_candidates, synthesize_options
 from browser_agent.agent.gather import gather_parallel
 from browser_agent.agent.grounding import web_grounding
 from browser_agent.agent.planner import plan_subgoals
 from browser_agent.agent.reader import readable_text
 from browser_agent.agent.reasoner import reasoner_decide
-from browser_agent.agent.scoring import is_near_tie, score_candidates
 from browser_agent.agent.verifier import verify_success
 from browser_agent.config import COMPOSITION_MODEL, MODEL, PLANNER_MODEL
 from browser_agent.log import get_logger
@@ -424,17 +423,16 @@ async def orchestrate(groq, session, reasoner_tools, capabilities, goal, *, allo
             i = 0
             continue
 
-        # --- exploit: deterministic scoring over gathered candidates (no LLM) ---
+        # --- exploit: the LLM ranks/selects the best candidates (decision kept with the model;
+        #     falls back to the deterministic rating scorer only if the LLM call fails) ---
         if sg_type == "exploit":
-            cands = state["candidates"]
-            weights = (sg.get("scoring") or {}).get("weights") or {}
-            ranked = score_candidates(cands, weights)
-            state["selected"] = ranked[0] if ranked else None
-            top3 = ranked[:3]
-            detail = (f"selected {state['selected']}" if state["selected"] else "no candidates to score")
-            log.info("subgoal %s exploit -> %s", sg["id"], detail)
+            sel = await select_candidates(groq, working_goal, state["candidates"], model=model)
+            state["selected"] = sel["selected"]
+            top3 = sel["top"][:3]
+            detail = (f"selected {state['selected']}" if state["selected"] else "no candidates to select")
+            log.info("subgoal %s exploit -> %s (%s)", sg["id"], detail, sel.get("reason", "")[:60])
             emit({"type": "exploit", "id": sg["id"], "selected": state["selected"],
-                  "top": top3, "near_tie": is_near_tie(ranked)})
+                  "top": top3, "near_tie": False, "reason": sel.get("reason", "")})
             emit({"type": "subgoal_end", "id": sg["id"], "status": "complete", "detail": detail})
             observations.append(detail)
             i += 1
