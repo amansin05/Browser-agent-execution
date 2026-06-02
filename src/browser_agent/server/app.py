@@ -107,8 +107,9 @@ async def ws(websocket: WebSocket):
                 read_content=bool(cfg.get("extract", cfg.get("vision", True))),
                 ground=bool(cfg.get("grounding", True)),
                 # Parallel multi-source explore (headless workers; drops the live profile for the
-                # gather). Defaults on; the dev-ui exposes a toggle.
-                parallel=bool(cfg.get("parallel", True)),
+                # gather). Defaults OFF — headless workers are invisible ("no progress on screen"),
+                # so visible execution in the live tab is the default; the dev-ui toggle opts in.
+                parallel=bool(cfg.get("parallel", False)),
                 approve=approve, ask=ask, emit=emit,
                 trace=False)  # the connection already records its own per-connection JSONL trace
             log.info("[%s] run finished: %s", memory.id, str(result)[:120])

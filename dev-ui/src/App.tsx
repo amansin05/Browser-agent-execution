@@ -9,8 +9,10 @@ import {
 } from "./icons";
 
 const DEFAULT_SETTINGS: Settings = {
+  // parallel OFF by default: headless workers are invisible ("no progress on screen"); visible
+  // execution in the live tab is the default so you can watch. Toggle it on for speed-over-visibility.
   agent: "two-tier", allow: "", maxSteps: 12, extract: true, grounding: true, pickTab: false,
-  parallel: true,
+  parallel: false,
 };
 
 const QUICK_START = [
