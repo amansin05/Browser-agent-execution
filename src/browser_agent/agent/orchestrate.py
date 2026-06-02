@@ -19,7 +19,7 @@ from browser_agent.agent.verifier import verify_success
 from browser_agent.config import COMPOSITION_MODEL, MODEL, PLANNER_MODEL
 from browser_agent.log import get_logger
 from browser_agent.services.mcp_client import (
-    full_snapshot, list_tabs_state, newest_new_tab, observe, select_tab,
+    full_snapshot, list_tabs_state, newest_new_tab, observe, open_session, select_tab,
 )
 from browser_agent.utils.domains import domain_allowed, domain_of
 from browser_agent.utils.io import maybe_await
@@ -349,9 +349,17 @@ async def orchestrate(groq, session, reasoner_tools, capabilities, goal, *, allo
 
     working_goal = goal  # grows as the user clarifies via ask_user, so the rest re-plans around it
 
-    # Ground the planner in real search results BEFORE planning. Computed once and reused across all
-    # plan/re-plan calls (we don't re-search on every re-plan). Best-effort: "" if it can't run.
-    grounding = await web_grounding(session, working_goal) if ground else ""
+    # Ground the planner in real search results BEFORE planning. Runs in a HEADLESS throwaway browser
+    # (offscreen) so the search engine is never shown in your visible tab — grounding is plumbing,
+    # not the task. Computed once and reused across all plan/re-plan calls. Best-effort: "" if it
+    # can't run (no search step shown, planning proceeds).
+    grounding = ""
+    if ground and working_goal and "http://" not in working_goal and "https://" not in working_goal:
+        try:
+            async with open_session(use_extension=False, browser=browser, headless=True) as (gsess, _gp):
+                grounding = await web_grounding(gsess, working_goal)
+        except Exception as e:  # best-effort: planning must proceed even if grounding can't launch
+            log.debug("headless grounding failed (%r); proceeding without it", e)
     if grounding:
         emit({"type": "grounding", "text": grounding})
     plan_preamble = f"{grounding}\n\n{preamble}".strip() if grounding else preamble
