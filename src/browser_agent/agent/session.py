@@ -11,6 +11,8 @@ The browser is torn down only on close() — which, in smoke mode, closes the br
 in extension mode merely disconnects (your real Chrome is never closed by us).
 """
 
+import os
+
 from browser_agent.agent.context import build_basic_context, context_text
 from browser_agent.agent.flat import agent_loop
 from browser_agent.agent.in_page_prompt import approve_in_page, ask_in_page
@@ -87,7 +89,28 @@ class AgentSession:
             if self._origin_tab:
                 log.info("remembered origin tab #%s: %s", self._origin_tab[0], self._origin_tab[1][:80])
             await self._ensure_working_tab()
+            await self._maybe_close_relay_tab()
         return self
+
+    async def _maybe_close_relay_tab(self) -> None:
+        """EXPERIMENTAL, opt-in via BROWSER_AGENT_CLOSE_RELAY_TAB=1: close the @playwright/mcp
+        extension's connect.html relay tab after the connection is up, so it isn't a visible tab.
+        RISKY — on some setups the relay lives in that page and closing it drops the agent's control
+        of the browser; if a run then errors immediately, unset the env var. Best-effort + logged."""
+        if not os.environ.get("BROWSER_AGENT_CLOSE_RELAY_TAB"):
+            return
+        try:
+            tabs = await self._list_tabs()
+        except Exception:
+            return
+        for idx, _cur, url in sorted(tabs, key=lambda t: t[0], reverse=True):  # high index first
+            if "connect.html" in url and url.startswith("chrome-extension://"):
+                try:
+                    await self.session.call_tool("browser_tabs", {"action": "close", "index": idx})
+                    log.info("closed the extension relay tab #%s (experimental; unset "
+                             "BROWSER_AGENT_CLOSE_RELAY_TAB if control breaks)", idx)
+                except Exception as e:
+                    log.warning("could not close relay tab #%s (%r)", idx, e)
 
     async def _ensure_working_tab(self) -> None:
         """Extension mode: guarantee the agent has its OWN tab to drive, so it never navigates or
