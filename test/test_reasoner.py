@@ -45,19 +45,45 @@ class FakeGroq:
         self.chat = NS(completions=NS(create=create))
 
 
+def _eval_result(value):
+    """A browser_evaluate result as Playwright MCP renders it (JSON under '### Result')."""
+    return NS(content=[NS(type="text", text=f"### Result\n{json.dumps(value)}\n### Page\n- ...")],
+              isError=False)
+
+
+def _dom_payload(n=3, url="http://test.local/", title="T", scroll_height=500, inner_height=900):
+    """A buildDomTree payload with `n` simple clickable elements (indices 0..n-1)."""
+    els = [{"i": i, "tag": "button", "type": "", "role": "", "name": f"btn{i}", "text": f"btn{i}",
+            "href": "", "inViewport": True} for i in range(n)]
+    return {"url": url, "title": title, "scrollY": 0, "scrollHeight": scroll_height,
+            "innerHeight": inner_height, "elements": els}
+
+
 class FakeSession:
+    """A fake MCP session. `dom` is the buildDomTree payload index_dom() reads (None forces the a11y
+    snapshot fallback); `action_result` is what an index-action eval returns. browser_evaluate is
+    routed to one or the other by inspecting the injected function (the build pass clears all
+    data-ba-id attributes; an action queries one)."""
     def __init__(self, url="http://test.local/", raise_on=None, results=None,
-                 snapshot_body='- heading "h" [ref=e1]'):
+                 snapshot_body='- heading "h" [ref=e1]', dom=None, action_result=None):
         self.url = url
         self.calls = []
         self.raise_on = set(raise_on or ())
         self.results = results or {}
         self.snapshot_body = snapshot_body  # default has a ref => "sufficient"
+        self.dom = dom                      # None => index_dom returns None => a11y fallback
+        self.action_result = action_result if action_result is not None else {"ok": True}
 
     async def call_tool(self, name, args):
         self.calls.append((name, args))
         if name in self.raise_on:
             raise RuntimeError("boom")
+        if name == "browser_evaluate":
+            fn = args.get("function", "")
+            if "querySelectorAll('[data-ba-id]')" in fn:          # the buildDomTree pass
+                return _eval_result(self.dom) if self.dom is not None \
+                    else NS(content=[NS(type="text", text="(no result)")], isError=False)
+            return _eval_result(self.action_result)               # an index-action eval
         if name == "browser_snapshot":
             txt = f"### Page\n- Page URL: {self.url}\n### Snapshot\n```yaml\n{self.snapshot_body}\n```"
             return NS(content=[NS(type="text", text=txt)], isError=False)
@@ -123,20 +149,20 @@ async def test_full_snapshot_not_truncated():
     assert len(capped) <= MAX_TOOL_RESULT_CHARS + 50          # observe still truncates
 
 
-def test_reasoner_excludes_noop_trap_tools():
-    # The reasoner must never be offered the "free no-op" tools it loops on (snapshot/screenshot are
-    # auto-provided; wait/evaluate/hover drain the budget without progress — see the "buy a phone"
-    # run where it looped on browser_hover across every retailer).
-    from browser_agent.agent.tools import REASONER_EXCLUDED, build_reasoner_tools
+def test_build_reasoner_tools_is_index_based():
+    # The reasoner now gets a FIXED index-addressed action set (not the raw MCP element tools), so
+    # the old "free no-op" traps (snapshot/screenshot/wait/evaluate/hover) and ref-based clicks are
+    # simply absent — replaced by click_element/input_text/etc that act on a stable [index].
+    from browser_agent.agent.tools import build_reasoner_tools
 
-    class T:
-        def __init__(self, name): self.name, self.description, self.inputSchema = name, "", None
-    for t in ("browser_hover", "browser_snapshot", "browser_take_screenshot", "browser_wait_for",
-              "browser_evaluate"):
-        assert t in REASONER_EXCLUDED
-    tools, caps = build_reasoner_tools([T("browser_navigate"), T("browser_hover"), T("browser_click")])
+    tools, caps = build_reasoner_tools()  # no MCP tool list needed any more
     names = {t["function"]["name"] for t in tools}
-    assert "browser_hover" not in names and "browser_navigate" in names
+    assert {"click_element", "input_text", "select_option", "scroll_page", "navigate"} <= names
+    assert {"subgoal_complete", "escalate", "ask_human"} <= names
+    # No raw MCP element/no-op tools leak in.
+    assert not ({"browser_click", "browser_type", "browser_snapshot", "browser_hover",
+                 "browser_evaluate", "browser_wait_for"} & names)
+    assert "click_element" in caps and "navigate" in caps  # planner is told the high-level verbs
 
 
 # ----------------------------------------------------------------- verifier (independent check)
@@ -154,16 +180,16 @@ async def test_verify_malformed():
 
 # ----------------------------------------------------------------- reasoner_decide (one turn)
 async def test_reasoner_decide_returns_single_action():
-    groq = FakeGroq([reasoner_resp("browser_click", '{"target": "#go"}', thought="clicking")])
+    groq = FakeGroq([reasoner_resp("click_element", '{"index": 3}', thought="clicking")])
     thought, action, args = await reasoner_decide(groq, [], SUBGOAL, "snapshot", [])
-    assert action == "browser_click" and args == {"target": "#go"} and thought == "clicking"
+    assert action == "click_element" and args == {"index": 3} and thought == "clicking"
 
 
 async def test_reasoner_decide_recovers_from_bad_request():
     # Scout's tool_use_failed wobble: a BadRequestError, then a valid call on the retry.
-    groq = FakeGroq([_bad_request(), reasoner_resp("browser_navigate", '{"url": "http://x"}')])
+    groq = FakeGroq([_bad_request(), reasoner_resp("navigate", '{"url": "http://x"}')])
     _, action, args = await reasoner_decide(groq, [], SUBGOAL, "snapshot", [])
-    assert action == "browser_navigate" and args == {"url": "http://x"}
+    assert action == "navigate" and args == {"url": "http://x"}
     # The retry turn fed the rejection back to the model.
     assert any("rejected" in m["content"] for m in groq.calls[1]["messages"] if m["role"] == "user")
 
@@ -191,39 +217,40 @@ async def test_verifier_reject_then_escalate():
 
 
 async def test_allowlist_blocks_navigation():
-    groq = FakeGroq([reasoner_resp("browser_navigate", '{"url": "https://evil.com/x"}'),
+    groq = FakeGroq([reasoner_resp("navigate", '{"url": "https://evil.com/x"}'),
                      reasoner_resp("escalate", '{"reason": "blocked"}')])
     session = FakeSession(url="https://example.com/")
-    status, _ = await _run(groq, session, allowlist={"example.com"})
+    status, _ = await _run(groq, session, allowlist={"example.com"}, read_content=False)
     assert status == "escalate"
+    # Blocked BEFORE execution -> the MCP navigate is never dispatched.
     assert ("browser_navigate", {"url": "https://evil.com/x"}) not in session.calls
 
 
 async def test_loop_detection_same_action_same_args():
     # The first loop NUDGES (one chance to change tactics); a SECOND loop escalates. So a reasoner
     # that just keeps repeating still hands back — it just gets one corrective turn first.
-    groq = FakeGroq([reasoner_resp("browser_wait_for", '{"time": 1}') for _ in range(8)])
-    status, detail = await _run(groq, FakeSession(), max_steps=12)
+    groq = FakeGroq([reasoner_resp("click_element", '{"index": 1}') for _ in range(8)])
+    status, detail = await _run(groq, FakeSession(dom=_dom_payload()), max_steps=12, read_content=False)
     assert status == "escalate" and "loop" in detail
 
 
 async def test_loop_detection_warns_once_before_escalating():
     # Exactly one loop -> a nudge, not an escalate: the reasoner recovers (navigates) and completes.
-    groq = FakeGroq([reasoner_resp("browser_click", '{"target": "#x"}'),
-                     reasoner_resp("browser_click", '{"target": "#x"}'),
-                     reasoner_resp("browser_click", '{"target": "#x"}'),    # 3rd identical -> loop -> NUDGE
-                     reasoner_resp("browser_navigate", '{"url": "http://test.local/list"}'),  # recovered
+    groq = FakeGroq([reasoner_resp("click_element", '{"index": 1}'),
+                     reasoner_resp("click_element", '{"index": 1}'),
+                     reasoner_resp("click_element", '{"index": 1}'),    # 3rd identical -> loop -> NUDGE
+                     reasoner_resp("navigate", '{"url": "http://test.local/list"}'),  # recovered
                      reasoner_resp("subgoal_complete"),
                      content_resp('{"satisfied": true, "reason": "ok"}')])
-    status, _ = await _run(groq, FakeSession(), max_steps=12)
+    status, _ = await _run(groq, FakeSession(dom=_dom_payload()), max_steps=12, read_content=False)
     assert status == "complete"
 
 
 async def test_loop_detection_same_action_varied_args():
     # Same action NAME with wobbling args (the Amazon failure shape) must still trip the looser
     # name-based detector — after the one-shot nudge, a persistent name-loop escalates.
-    groq = FakeGroq([reasoner_resp("browser_click", f'{{"target": "#x{i}"}}') for i in range(8)])
-    status, detail = await _run(groq, FakeSession(), max_steps=12)
+    groq = FakeGroq([reasoner_resp("click_element", f'{{"index": {i}}}') for i in range(8)])
+    status, detail = await _run(groq, FakeSession(dom=_dom_payload()), max_steps=12, read_content=False)
     assert status == "escalate" and "loop" in detail
 
 
@@ -240,9 +267,9 @@ async def test_repeated_rejected_complete_escalates():
 
 
 async def test_step_budget_exhausted():
-    groq = FakeGroq([reasoner_resp("browser_wait_for", '{"time": 1}'),
-                     reasoner_resp("browser_wait_for", '{"time": 2}')])
-    status, _ = await _run(groq, FakeSession(), max_steps=2)
+    groq = FakeGroq([reasoner_resp("click_element", '{"index": 0}'),
+                     reasoner_resp("scroll_page", '{"direction": "down"}')])
+    status, _ = await _run(groq, FakeSession(dom=_dom_payload()), max_steps=2, read_content=False)
     assert status == "exhausted"
 
 
@@ -261,8 +288,9 @@ async def test_explore_spec_reaches_reasoner_prompt():
 
 # ----------------------------------------------------------------- follow-new-tab
 class TabFakeSession:
-    """A session whose first browser_click opens a new tab — and (like Playwright's real lag)
-    leaves its 'current' on the OPENER. Proves the agent follows + activates the new tab."""
+    """A session whose first index-action click opens a new tab — and (like Playwright's real lag)
+    leaves its 'current' on the OPENER. Proves the agent follows + activates the new tab. The click
+    now runs through browser_evaluate (el.click()), not browser_click."""
     def __init__(self):
         self.tabs = [(0, "http://work/")]
         self.current = 0
@@ -273,6 +301,12 @@ class TabFakeSession:
         return "\n".join(f"- {i}: {'(current) ' if i == self.current else ''}[Tab{i}]({u})"
                          for i, u in self.tabs)
 
+    def _dom(self):
+        url = dict(self.tabs)[self.current]
+        return {"url": url, "title": "t", "scrollY": 0, "scrollHeight": 500, "innerHeight": 900,
+                "elements": [{"i": 0, "tag": "a", "type": "", "role": "", "name": "open",
+                              "text": "open", "href": "", "inViewport": True}]}
+
     async def call_tool(self, name, args):
         self.calls.append((name, args))
         if name == "browser_tabs" and args.get("action") == "list":
@@ -280,19 +314,20 @@ class TabFakeSession:
         if name == "browser_tabs" and args.get("action") == "select":
             self.current = args["index"]
             return NS(content=[NS(type="text", text="ok")], isError=False)
-        if name == "browser_snapshot":
-            url = dict(self.tabs)[self.current]
-            return NS(content=[NS(type="text", text=f"### Page\n- Page URL: {url}\n- heading \"h\" [ref=e1]")],
-                      isError=False)
-        if name == "browser_click" and not self._opened:
-            self._opened = True
-            self.tabs.append((1, "http://phone-detail/"))  # opened the detail in a new tab
-            return NS(content=[NS(type="text", text="opened a new tab")], isError=False)
+        if name == "browser_evaluate":
+            fn = args.get("function", "")
+            if "querySelectorAll('[data-ba-id]')" in fn:            # the buildDomTree pass
+                return _eval_result(self._dom())
+            if not self._opened:                                    # the click action -> opens a tab
+                self._opened = True
+                self.tabs.append((1, "http://phone-detail/"))
+                return _eval_result({"ok": True, "tag": "a"})
+            return _eval_result({"ok": True})
         return NS(content=[NS(type="text", text=f"ok-{name}")], isError=False)
 
 
 async def test_run_subgoal_follows_new_tab():
-    groq = FakeGroq([reasoner_resp("browser_click", '{"element": "e1", "target": "#x"}'),
+    groq = FakeGroq([reasoner_resp("click_element", '{"index": 0}'),
                      reasoner_resp("subgoal_complete"),
                      content_resp('{"satisfied": true, "reason": "ok"}')])
     sess = TabFakeSession()

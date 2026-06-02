@@ -1,7 +1,13 @@
 """Tool vocabulary for the two-tier reasoner.
 
-The reasoner acts with the real Playwright MCP tools PLUS three synthetic control actions
-(subgoal_complete / escalate / ask_human) that it signals through the same tool-calling channel.
+The reasoner acts with a fixed, curated action set — the INDEX-ADDRESSED page actions
+(INDEX_ACTION_TOOLS, executed in-page via agent/dom_index.py) plus three synthetic control actions
+(subgoal_complete / escalate / ask_human). It does NOT get the raw Playwright-MCP element tools:
+referring to elements by a stable [index] (resolved to the element's data-ba-id) replaces the
+fragile snapshot-ref clicks, and curating the set out of existence also removes the old "free no-op"
+traps the reasoner used to loop on (browser_snapshot/screenshot/wait_for/evaluate/hover — each one
+burned the step budget without progress on the Amazon/Flipkart runs). The flat agent still gets the
+full MCP tool set (minus EXCLUDED_TOOLS).
 """
 
 from browser_agent.services.mcp_client import mcp_tools_to_groq
@@ -9,32 +15,6 @@ from browser_agent.services.mcp_client import mcp_tools_to_groq
 # Never expose these to the agent. browser_close would close tabs (we keep them open across a
 # session — see AgentSession); browser_run_code_unsafe is gated off by default anyway.
 EXCLUDED_TOOLS = {"browser_close", "browser_run_code_unsafe"}
-
-# Additionally hidden from the TWO-TIER REASONER (but kept for the flat agent): the orchestrator
-# already feeds a fresh snapshot to the reasoner every turn (observe()) and, when the DOM is sparse,
-# appends clean extracted page text (Readability.js -> trafilatura; see agent/reader.py). Re-exposing
-# these lets the reasoner pick them as a "free" no-op action — which it then repeats and trips the
-# loop detector, dying at the first subgoal. So the reasoner never calls them itself.
-# browser_wait_for is the same trap but worse: when its text never appears it blocks for the full
-# 30s MCP timeout AND burns a step, so a few bad waits exhaust the whole subgoal budget (the
-# Amazon "Levi's 501 retailers" run died this way). The reasoner gets a fresh snapshot every turn,
-# so it never needs to wait — withhold it too.
-# browser_evaluate is the SAME trap once more: the reasoner treats it as a "free" way to inspect
-# the page, hallucinates a CSS selector (e.g. '.s-result-item.s-asin Pipeline'), gets 0/None back,
-# re-runs the identical call, and trips the loop detector — dying at the first explore subgoal
-# without ever taking a real action. Candidates are read off the snapshot by extract_candidates,
-# not by the reasoner running JS, so the reasoner never needs it — withhold it too. (The
-# orchestrator itself still drives browser_evaluate directly for the content extractor and the
-# web-grounding step — see agent/reader.py and agent/grounding.py — just never the reasoner.)
-# browser_hover is the SAME trap AGAIN: on heavy retail pages (Amazon/Flipkart) the reasoner hovered
-# the same element 5+ times to "reveal" content — sometimes even passing a URL as the target (a CSS
-# parse error) — burning the whole step budget without ever reading listings (the "i want to buy a
-# phone" run died this way on every source). A fresh snapshot already shows whatever a hover would
-# reveal on the next turn, and the reasoner can navigate to a category URL or click directly, so it
-# never needs to hover — withhold it.
-REASONER_EXCLUDED = EXCLUDED_TOOLS | {
-    "browser_snapshot", "browser_take_screenshot", "browser_wait_for", "browser_evaluate",
-    "browser_hover"}
 
 SYNTHETIC_TOOLS = [
     {"type": "function", "function": {
@@ -51,6 +31,59 @@ SYNTHETIC_TOOLS = [
         "parameters": {"type": "object", "properties": {"question": {"type": "string"}}, "required": ["question"]}}},
 ]
 SYNTHETIC_NAMES = {"subgoal_complete", "escalate", "ask_human"}
+
+# The reasoner's INDEX-ADDRESSED action set. These REPLACE the raw Playwright-MCP element tools
+# (browser_click / browser_type / browser_select_option with snapshot refs). The reasoner now refers
+# to elements by the [index] shown in the indexed-DOM view (agent/dom_index.py); the orchestrator
+# resolves that index back to the exact element via its data-ba-id, so a click never depends on a
+# stale ref or a guessed CSS selector. Navigation / key presses are dispatched to MCP internally
+# (agent/dom_index.execute_action), so the reasoner never touches the raw MCP tool list — which also
+# removes the old "free no-op trap" tools (snapshot/screenshot/wait/evaluate/hover) entirely.
+INDEX_ACTION_TOOLS = [
+    {"type": "function", "function": {
+        "name": "click_element",
+        "description": "Click the interactive element with the given [index] from the current page view.",
+        "parameters": {"type": "object", "properties": {
+            "index": {"type": "integer", "description": "The [index] of the element to click."}},
+            "required": ["index"]}}},
+    {"type": "function", "function": {
+        "name": "input_text",
+        "description": ("Type text into the input / textarea / contenteditable with the given "
+                        "[index]. Set submit=true to press Enter afterward (e.g. to run a search)."),
+        "parameters": {"type": "object", "properties": {
+            "index": {"type": "integer"},
+            "text": {"type": "string"},
+            "submit": {"type": "boolean", "description": "Press Enter after typing."}},
+            "required": ["index", "text"]}}},
+    {"type": "function", "function": {
+        "name": "select_option",
+        "description": "Select an option (by value or visible label) in the <select> with the given [index].",
+        "parameters": {"type": "object", "properties": {
+            "index": {"type": "integer"}, "value": {"type": "string"}},
+            "required": ["index", "value"]}}},
+    {"type": "function", "function": {
+        "name": "scroll_page",
+        "description": ("Scroll the page by ~one screen to reveal more elements (off-screen elements "
+                        "are flagged in the view)."),
+        "parameters": {"type": "object", "properties": {
+            "direction": {"type": "string", "enum": ["down", "up"]}}, "required": []}}},
+    {"type": "function", "function": {
+        "name": "navigate",
+        "description": ("Navigate directly to a URL. PREFER this to reach a known page (a category "
+                        "or search-results URL) instead of clicking through menus."),
+        "parameters": {"type": "object", "properties": {"url": {"type": "string"}},
+                       "required": ["url"]}}},
+    {"type": "function", "function": {
+        "name": "press_key",
+        "description": "Press a single key on the focused element (e.g. Enter, Escape, PageDown).",
+        "parameters": {"type": "object", "properties": {"key": {"type": "string"}},
+                       "required": ["key"]}}},
+    {"type": "function", "function": {
+        "name": "go_back",
+        "description": "Go back to the previous page.",
+        "parameters": {"type": "object", "properties": {}, "required": []}}},
+]
+INDEX_ACTION_NAMES = {t["function"]["name"] for t in INDEX_ACTION_TOOLS}
 
 # An ask_user tool the FLAT agent can call to pop the MCQ modal when the request is ambiguous
 # (e.g. "buy a phone" -> which brand?), instead of replying with a clarifying question.
@@ -75,13 +108,13 @@ def flat_tools(listed_tools) -> list[dict]:
             if t["function"]["name"] not in EXCLUDED_TOOLS] + [ASK_USER_TOOL]
 
 
-def build_reasoner_tools(listed_tools) -> tuple[list[dict], list[str]]:
-    """Reasoner tool schema (MCP minus reasoner-excluded, plus synthetic controls) and the
-    capability name list the planner is told about. browser_snapshot/screenshot are withheld —
-    see REASONER_EXCLUDED."""
-    mcp_names = [t.name for t in listed_tools if t.name not in REASONER_EXCLUDED]
-    mcp = [t for t in mcp_tools_to_groq(listed_tools)
-           if t["function"]["name"] not in REASONER_EXCLUDED]
-    reasoner = mcp + SYNTHETIC_TOOLS
-    capabilities = mcp_names + sorted(SYNTHETIC_NAMES)
+def build_reasoner_tools(listed_tools=None) -> tuple[list[dict], list[str]]:
+    """The reasoner's fixed, curated action set: the index-addressed page actions
+    (INDEX_ACTION_TOOLS, executed via agent/dom_index.py) plus the synthetic controls, and the
+    capability-name list the planner is told about. This REPLACES the old "MCP tools minus the
+    no-op traps" scheme — the reasoner no longer drives raw MCP element tools by snapshot ref, so
+    `listed_tools` is accepted only for call-site compatibility and is unused (navigation and key
+    presses are dispatched to MCP internally by dom_index.execute_action)."""
+    reasoner = INDEX_ACTION_TOOLS + SYNTHETIC_TOOLS
+    capabilities = sorted(INDEX_ACTION_NAMES) + sorted(SYNTHETIC_NAMES)
     return reasoner, capabilities

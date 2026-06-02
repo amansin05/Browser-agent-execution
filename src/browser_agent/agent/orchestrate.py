@@ -8,6 +8,7 @@ tabs.
 import asyncio
 import json
 
+from browser_agent.agent.dom_index import execute_action, index_dom
 from browser_agent.agent.extract import extract_candidates, synthesize_options
 from browser_agent.agent.grounding import web_grounding
 from browser_agent.agent.planner import plan_subgoals
@@ -18,7 +19,7 @@ from browser_agent.agent.verifier import verify_success
 from browser_agent.config import COMPOSITION_MODEL, MODEL, PLANNER_MODEL
 from browser_agent.log import get_logger
 from browser_agent.services.mcp_client import (
-    full_snapshot, list_tabs_state, newest_new_tab, observe, select_tab, tool_result_to_text,
+    full_snapshot, list_tabs_state, newest_new_tab, observe, select_tab,
 )
 from browser_agent.utils.domains import domain_allowed, domain_of
 from browser_agent.utils.io import maybe_await
@@ -47,6 +48,11 @@ MAX_CLARIFICATIONS = 2
 # immediately re-declares — spamming until the step budget drains. After this many refused
 # completions in a subgoal, hand back to the planner instead.
 MAX_COMPLETE_REJECTS = 3
+
+# Below this many interactive elements, the indexed-DOM view alone is too thin to reason over (a
+# content blob, an article, a canvas) — append the cleaned page text (Readability -> trafilatura ->
+# innerText) so the reasoner has something to read, the same salvage the a11y path used.
+MIN_INTERACTIVE_FOR_TEXT = 3
 
 
 async def _approve_with_timeout(approve, prompt: str, timeout: float = APPROVAL_TIMEOUT) -> bool:
@@ -77,6 +83,8 @@ async def run_subgoal(groq, session, reasoner_tools, subgoal, *, allowlist, appr
     complete_rejects = 0
     loop_nudges = 0
     working_tab = None  # the tab the agent drives; we keep focus pinned here across new-tab popups
+    previous_keys: set = set()  # interactive-element keys from the last step -> mark NEW ones (*)
+    dom = None                  # the current indexed-DOM view (None when we fell back to a11y)
 
     for step in range(1, max_steps + 1):
         # Keep the agent and the user on the SAME tab. `working_tab` follows the tab a click opened
@@ -89,14 +97,27 @@ async def run_subgoal(groq, session, reasoner_tools, subgoal, *, allowlist, appr
         elif cur is not None and cur != working_tab and working_tab in idxs:
             await select_tab(session, working_tab)
 
-        snapshot_text, url = await observe(session)
-        if read_content and not snapshot_is_sufficient(snapshot_text):
-            # The accessibility snapshot is too sparse to reason over (JS-heavy app, canvas, opaque
-            # content blob). Turn the LIVE page into clean text and append it to the observation so
-            # the reasoner has something to work with — instead of a screenshot (vision removed).
+        # PERCEPTION: build the indexed-DOM view (numbered interactive elements + NEW marks) as the
+        # reasoner's primary observation — stable addresses instead of a11y refs. Fall back to the
+        # accessibility snapshot only if the in-page build fails or finds nothing to act on.
+        dom = await index_dom(session)
+        if dom is not None and dom.elements:
+            snapshot_text = dom.render(previous_keys)
+            url = dom.url or url
+            previous_keys = dom.keys
+        else:
+            snapshot_text, url = await observe(session)
+            previous_keys = set()
+
+        # Append cleaned page text when there's little to act on (a content page / opaque app): the
+        # reasoner needs something to read. Gate on the indexed view when we have one, else on the
+        # legacy a11y sufficiency check — so a normal interactive page never triggers it.
+        if read_content and (
+                (dom is not None and len(dom.elements) < MIN_INTERACTIVE_FOR_TEXT)
+                or (dom is None or not dom.elements) and not snapshot_is_sufficient(snapshot_text)):
             extra = await readable_text(session)
             if extra:
-                log.debug("step %d: DOM snapshot sparse — appended %d chars of extracted content",
+                log.debug("step %d: page thin to act on — appended %d chars of extracted content",
                           step, len(extra))
                 emit({"type": "extract", "step": step, "chars": len(extra)})
                 snapshot_text = f"{snapshot_text}\n\n### Extracted readable content\n{extra[:6000]}"
@@ -127,9 +148,20 @@ async def run_subgoal(groq, session, reasoner_tools, subgoal, *, allowlist, appr
             emit({"type": "ask_answer", "answer": answer})
             continue
 
-        # --- real browser action: enforce domain allowlist ---
-        target_url = args.get("url", url)
-        if not domain_allowed(target_url, allowlist):
+        # --- enforce domain allowlist (only on actions that can change origin) ---
+        # navigate carries the target URL; a click on a link carries it as the element's href.
+        # In-page interactions (type/select/scroll) stay on the current origin, so they're exempt.
+        target_url = None
+        if action == "navigate":
+            target_url = args.get("url", "")
+        elif action == "click_element" and dom is not None:
+            try:
+                el = dom.selector_map.get(int(args.get("index")))
+            except (TypeError, ValueError):
+                el = None
+            if el and el.href.startswith(("http://", "https://")):
+                target_url = el.href
+        if target_url and not domain_allowed(target_url, allowlist):
             msg = f"blocked by allowlist: {domain_of(target_url)!r} not in {sorted(allowlist)}"
             log.warning("%s", msg)
             recent_actions.append(f"{action} -> {msg}")
@@ -164,31 +196,24 @@ async def run_subgoal(groq, session, reasoner_tools, subgoal, *, allowlist, appr
                 continue
             return "escalate", f"loop detected: repeated {action}"
 
-        # --- execute via MCP ---
-        try:
-            before_idxs = idxs
-            result = await session.call_tool(action, args)
-            rtext = tool_result_to_text(result)
-            # If the action opened a new tab (e.g. a result that opens in its own tab), FOLLOW it:
-            # adopt it as the working tab and make it active, so the agent works on the same tab the
-            # user is now looking at instead of being stranded on the opener.
-            cur2, idxs2 = await list_tabs_state(session)
-            adopt = newest_new_tab(before_idxs, idxs2)
-            if adopt is not None:
-                working_tab = adopt
-                if cur2 != adopt:
-                    await select_tab(session, adopt)
-                rtext += "\n(note: a new tab opened — followed it)"
-        except Exception as e:
-            rtext = f"ERROR calling {action}: {e!r}"
-            log.warning("step %d: %s raised: %r", step, action, e)
+        # --- execute: index-addressed in-page action, or MCP navigation/key (see dom_index) ---
+        before_idxs = idxs
+        res = await execute_action(session, action, args)
+        rtext = res["outcome"]
+        # If the action opened a new tab (e.g. a result that opens in its own tab), FOLLOW it:
+        # adopt it as the working tab and make it active, so the agent works on the same tab the
+        # user is now looking at instead of being stranded on the opener.
+        cur2, idxs2 = await list_tabs_state(session)
+        adopt = newest_new_tab(before_idxs, idxs2)
+        if adopt is not None:
+            working_tab = adopt
+            if cur2 != adopt:
+                await select_tab(session, adopt)
+            rtext += " (note: a new tab opened — followed it)"
         outcome = rtext[:150].replace("\n", " ")
         log.debug("step %d result: %s", step, outcome)
         recent_actions.append(f"{action}({json.dumps(args)[:60]}) -> {outcome}")
-        emit({"type": "action_result", "action": action, "outcome": outcome})
-        # Cross-subgoal memory: keep evaluate/extract-style readouts.
-        if action == "browser_evaluate":
-            observations.append(rtext[:300])
+        emit({"type": "action_result", "action": action, "outcome": outcome, "ok": res["ok"]})
 
     return "exhausted", "step budget exhausted"
 

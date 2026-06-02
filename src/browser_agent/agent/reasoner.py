@@ -33,10 +33,10 @@ def _explore_guidance(subgoal) -> str:
     # to the fastest route — a direct category/search URL, or the on-page search box — and away from
     # re-clicking the same nav element (the "buy a phone" homepage-click failure).
     bits.append(
-        "To REACH the listings fast: navigate DIRECTLY to a category or search-results URL "
-        "(e.g. https://site/mobiles or https://site/search?q=<your query>), OR type your query into "
-        "the page's search box and submit (Enter). Prefer this over clicking through menus, and "
-        "never click the same element twice — if a click does nothing, navigate to a URL instead.")
+        "To REACH the listings fast: use `navigate` to go DIRECTLY to a category or search-results "
+        "URL (e.g. https://site/mobiles or https://site/search?q=<your query>), OR `input_text` on "
+        "the search box's [index] with submit:true. Prefer this over clicking through menus, and "
+        "never repeat the same click — if a click does nothing, `navigate` to a URL instead.")
     must = spec.get("must_have") or []
     if must:
         bits.append(f"Each candidate must meet: {', '.join(map(str, must))}.")

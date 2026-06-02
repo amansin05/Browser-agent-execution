@@ -28,6 +28,7 @@ from dataclasses import dataclass, field
 
 from browser_agent.agent.reader import evaluate_json
 from browser_agent.log import get_logger
+from browser_agent.services.mcp_client import tool_result_to_text
 
 log = get_logger(__name__)
 
@@ -357,3 +358,57 @@ async def scroll_page(session, direction: str = "down", amount: int | None = Non
           "  return {ok:true, scrollY:Math.round(window.scrollY), "
           "scrollHeight:Math.round(document.documentElement.scrollHeight)};\n}")
     return await _run_action(session, fn)
+
+
+# --------------------------------------------------------------------------- the reasoner dispatch
+# A single entry point the orchestrator calls per reasoner turn. In-page interactions go through the
+# index-addressed actions above; navigation / key presses go to the real Playwright-MCP tools. Every
+# return is {"ok": bool, "outcome": str} and nothing raises — the orchestrator turns `outcome` into
+# the recent-actions line the reasoner reads next turn.
+INTERACTION_ACTIONS = {"click_element", "input_text", "select_option", "scroll_page"}
+MCP_ACTIONS = {"navigate", "go_back", "press_key"}
+REASONER_ACTION_NAMES = INTERACTION_ACTIONS | MCP_ACTIONS
+
+
+def _mcp_outcome(res) -> dict:
+    txt = tool_result_to_text(res)
+    return {"ok": not getattr(res, "isError", False), "outcome": txt[:200].replace("\n", " ")}
+
+
+def _inpage_outcome(r: dict) -> dict:
+    """Turn an index-action result dict into the standard {ok, outcome}."""
+    if not r.get("ok"):
+        return {"ok": False, "outcome": str(r.get("reason") or "no effect")[:200]}
+    bits = [f"{k}={v}" for k, v in r.items() if k not in ("ok", "reason") and v not in (None, "")]
+    return {"ok": True, "outcome": ("ok (" + ", ".join(bits) + ")") if bits else "ok"}
+
+
+async def execute_action(session, action: str, args: dict) -> dict:
+    """Execute one reasoner action. Returns {"ok": bool, "outcome": str}; never raises."""
+    try:
+        if action == "click_element":
+            return _inpage_outcome(await click_element(session, int(args.get("index"))))
+        if action == "input_text":
+            r = await input_text(session, int(args.get("index")), str(args.get("text", "")))
+            if r.get("ok") and args.get("submit"):
+                # Press Enter as a REAL keyboard event on the now-focused field (more reliable than
+                # synthesising one in JS) — this is what runs a search / submits a form.
+                try:
+                    await session.call_tool("browser_press_key", {"key": "Enter"})
+                    r["submitted"] = True
+                except Exception as e:  # noqa: BLE001 — Enter is best-effort; the type already landed
+                    r["submit_error"] = repr(e)
+            return _inpage_outcome(r)
+        if action == "select_option":
+            return _inpage_outcome(await select_option(session, int(args.get("index")), str(args.get("value", ""))))
+        if action == "scroll_page":
+            return _inpage_outcome(await scroll_page(session, str(args.get("direction", "down")), args.get("amount")))
+        if action == "navigate":
+            return _mcp_outcome(await session.call_tool("browser_navigate", {"url": args.get("url", "")}))
+        if action == "go_back":
+            return _mcp_outcome(await session.call_tool("browser_navigate_back", {}))
+        if action == "press_key":
+            return _mcp_outcome(await session.call_tool("browser_press_key", {"key": args.get("key", "Enter")}))
+        return {"ok": False, "outcome": f"unknown action {action!r}"}
+    except Exception as e:  # noqa: BLE001 — a bad action must surface as feedback, not crash the run
+        return {"ok": False, "outcome": f"{action} raised: {e!r}"}
