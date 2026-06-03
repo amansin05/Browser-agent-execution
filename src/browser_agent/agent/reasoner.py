@@ -10,6 +10,30 @@ from browser_agent.log import get_logger
 
 log = get_logger(__name__)
 
+# How many times to retry a rejected (tool_use_failed) tool call before escalating. The wobble is
+# transient JSON-typing noise from Scout (a quoted number/boolean), so a generous cap keeps it from
+# killing a whole subgoal — this was the dominant cause of death, so the cap is high.
+_TOOL_RETRY_ATTEMPTS = 8
+
+# Compact reasoning trail fed back to the reasoner (fix 5b): the last few actions, NOT the deep JSONL
+# trace (that lives on disk). Keep it short and per-line capped so the prompt stays token-bounded even
+# after a long, noisy subgoal.
+_TRAIL_KEEP = 6
+_TRAIL_LINE_CAP = 160
+
+
+def _trail(recent_actions) -> str:
+    """Render the last `_TRAIL_KEEP` actions as a numbered list, each collapsed to one line and capped
+    to `_TRAIL_LINE_CAP` chars. No raw tool payloads / JSONL reach the prompt — just enough history for
+    the model to avoid repeating itself and to see what just happened."""
+    lines = []
+    for i, a in enumerate(recent_actions[-_TRAIL_KEEP:]):
+        text = " ".join(str(a).split())                 # collapse newlines / runs of whitespace
+        if len(text) > _TRAIL_LINE_CAP:
+            text = text[:_TRAIL_LINE_CAP - 1] + "…"
+        lines.append(f"  {i + 1}. {text}")
+    return "\n".join(lines) or "  (none yet)"
+
 
 def _explore_guidance(subgoal) -> str:
     """Render the explore_spec into a guidance block for the reasoner. Without this the reasoner
@@ -56,39 +80,62 @@ def _explore_guidance(subgoal) -> str:
 
 
 async def reasoner_decide(groq, reasoner_tools, subgoal, snapshot_text, recent_actions,
-                          last_thought="", plan_context="", model=MODEL):
+                          last_thought="", plan_context="", model=MODEL, emit=None, last_rejection=""):
     """One reasoner turn -> (thought, actions) where `actions` is an ordered list of (name, args).
     The model MAY emit several tool calls in one turn (e.g. fill a few fields then submit); the
     orchestrator executes them in order behind a page-change guard. `thought` is the model's
     free-text note (its evaluation of the last action + what it's doing now), echoed back next turn
     via `last_thought` for continuity. Recovers from the Scout tool_use_failed wobble by retrying
-    with a correction (bounded). Text-only: when the page is too sparse, the orchestrator appends an
+    with a correction (bounded). `emit` (optional) records each rejected tool call to the trace
+    (fix 5a). Text-only: when the page is too sparse, the orchestrator appends an
     `### Extracted readable content` block to `snapshot_text` — there is no image path."""
-    recent = "\n".join(f"  {i+1}. {a}" for i, a in enumerate(recent_actions[-6:])) or "  (none yet)"
+    emit = emit or (lambda e: None)
+    recent = _trail(recent_actions)
     note = f"### Your previous note\n{last_thought.strip()}\n\n" if last_thought.strip() else ""
     progress = f"### Plan progress\n{plan_context.strip()}\n\n" if plan_context.strip() else ""
+    # Surface the LAST verifier rejection on its own line (fix 5b): it's the single most important
+    # signal for "you said done but you're not" and would otherwise scroll off the recent-actions
+    # trail after a few more steps. Capped like a trail line so it can't bloat the prompt.
+    rej = ""
+    if last_rejection.strip():
+        r = " ".join(last_rejection.split())[:300]
+        rej = (f"### Last completion was REJECTED\nThe verifier rejected your previous subgoal_complete: "
+               f"{r}\nFix THAT before completing again.\n\n")
     user = (f"{progress}### Current subgoal\n{subgoal['goal']}\n"
             f"Success when: {subgoal['success_condition']}\n"
             f"{_explore_guidance(subgoal)}\n"
             f"### Live page\n{snapshot_text[:9000]}\n\n"
-            f"{note}### Recent actions\n{recent}\n\n"
+            f"{rej}{note}### Recent actions\n{recent}\n\n"
             f"First, briefly evaluate whether your previous action worked and note what to remember. "
             f"Then choose the next action. You MAY issue SEVERAL actions in this turn ONLY when they "
             f"are safe to chain on the SAME page (e.g. fill multiple fields, then submit) — the page "
             f"view refreshes after any navigation/click, so never queue actions past one of those.")
     messages = [{"role": "system", "content": REASONER_SYSTEM}, {"role": "user", "content": user}]
-    for _attempt in range(4):
+    # Scout's `tool_use_failed` wobble (booleans/numbers emitted as quoted strings) is TRANSIENT — it
+    # almost always recovers on a corrected retry. A too-low cap let a single wobble escalate a whole
+    # subgoal (the "repeated malformed tool calls" failures), so give it a generous budget and feed
+    # the offending payload back so the model fixes the exact field.
+    for _attempt in range(_TOOL_RETRY_ATTEMPTS):
         try:
             resp = await groq.chat.completions.create(
                 model=model, temperature=0.0, max_completion_tokens=700,
                 tools=reasoner_tools, tool_choice="required", messages=messages,
             )
         except BadRequestError as e:
-            detail = (getattr(e, "body", None) or {}).get("error", {}).get("message", str(e))
-            log.warning("reasoner tool call rejected (attempt %d/4): %s", _attempt + 1, detail[:160])
+            body = getattr(e, "body", None) or {}
+            err = body.get("error", {}) if isinstance(body, dict) else {}
+            detail = err.get("message", str(e)) if isinstance(err, dict) else str(e)
+            failed = (err.get("failed_generation") or err.get("failed_tool_call")) if isinstance(err, dict) else None
+            log.warning("reasoner tool call rejected (attempt %d/%d): %s | payload=%.200r",
+                        _attempt + 1, _TOOL_RETRY_ATTEMPTS, str(detail)[:160], failed)
+            emit({"type": "tool_use_failed", "attempt": _attempt + 1,
+                  "max_attempts": _TOOL_RETRY_ATTEMPTS, "detail": str(detail)[:300],
+                  "payload": (str(failed)[:500] if failed is not None else None)})
             messages.append({"role": "user", "content":
-                             f"Your tool call was rejected: {detail}\nRe-issue your call(s) with only "
-                             "needed params and correct JSON types (booleans/numbers unquoted)."})
+                             f"Your tool call was rejected: {detail}\nRe-issue ONE tool call with only "
+                             "the needed params and correct JSON types: `index` must be an integer "
+                             "(3, not \"3\"); booleans are true/false (not \"true\"); omit optional "
+                             "params. Do NOT wrap numbers or booleans in quotes."})
             continue
         msg = resp.choices[0].message
         if not msg.tool_calls:

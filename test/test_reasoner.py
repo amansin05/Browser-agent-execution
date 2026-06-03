@@ -121,6 +121,11 @@ def _bad_request(message="tool_use_failed: invalid tool arguments"):
     return e
 
 
+async def _noop_sleep(*a, **k):
+    """Skip the deterministic add-to-cart confirm-poll delays so those tests don't wait real seconds."""
+    return None
+
+
 # ----------------------------------------------------------------- helpers used by the reasoner
 def test_domain_allowed():
     assert domain_allowed("http://anything.com", set()) is True
@@ -488,3 +493,376 @@ async def test_extractor_disabled_skips_extraction(monkeypatch):
     assert called["n"] == 0
     prompt = groq.calls[0]["messages"][1]["content"]
     assert "### Extracted readable content" not in prompt
+
+
+# ----------------------------------------------------------------- fix 4/5: ping-pong + listing-ready
+async def test_pingpong_navigate_back_to_recent_url_escalates():
+    # The click->product->navigate-back-to-search bounce: the index varies (so exact-loop misses it)
+    # and the navigate targets a URL we've recently been on. The ping-pong guard blocks each
+    # navigate-back and escalates after MAX_REVISIT_NUDGES.
+    acts = []
+    for i in range(orch.MAX_REVISIT_NUDGES):
+        acts.append(reasoner_resp("click_element", f'{{"index": {i}}}'))            # varying index
+        acts.append(reasoner_resp("navigate", '{"url": "http://test.local/"}'))     # back to current page
+    groq = FakeGroq(acts)
+    status, detail = await _run(groq, FakeSession(dom=_dom_payload()), max_steps=12, read_content=False)
+    assert status == "escalate" and "ping-pong" in detail
+
+
+async def test_navigate_to_current_page_is_blocked():
+    # A bare navigate to the page we're already on is redundant — it's blocked + nudged, never dispatched.
+    groq = FakeGroq([reasoner_resp("navigate", '{"url": "http://test.local/"}'),
+                     reasoner_resp("subgoal_complete"),
+                     content_resp('{"satisfied": true, "reason": "ok"}')])
+    sess = FakeSession(dom=_dom_payload())
+    status, _ = await _run(groq, sess, max_steps=5, read_content=False)
+    assert status == "complete"
+    assert ("browser_navigate", {"url": "http://test.local/"}) not in sess.calls  # never dispatched
+
+
+async def test_explore_drops_navigate_and_click_once_listing_ready(monkeypatch):
+    # Fix 4b: on an EXPLORE subgoal, once the live DOM yields a product grid we hand the reasoner a
+    # tool set WITHOUT navigate / click_element, so it completes here instead of clicking into a
+    # product (the ping-pong source).
+    from browser_agent.agent.tools import build_reasoner_tools
+    tools, _ = build_reasoner_tools()
+    captured = {}
+
+    async def fake_dom(session, spec=None, *, max_items=40):
+        return [{"name": f"Book {i}", "price": "₹100"} for i in range(orch.EXPLORE_LISTING_MIN)]
+
+    async def fake_decide(groq, turn_tools, subgoal, snap, recent, last_thought="", plan_context="",
+                          model=None, **kw):
+        captured["names"] = {t["function"]["name"] for t in turn_tools}
+        return ("done", [("subgoal_complete", {})])
+
+    monkeypatch.setattr(orch, "extract_candidates_dom", fake_dom)
+    monkeypatch.setattr(orch, "reasoner_decide", fake_decide)
+    sg = {"goal": "gather book listings", "success_condition": "a list is visible", "type": "explore",
+          "explore_spec": {"sources": ["amazon"]}}
+    groq = FakeGroq([content_resp('{"satisfied": true, "reason": "list visible"}')])  # verifier
+    status, _ = await run_subgoal(groq, FakeSession(dom=_dom_payload()), tools, sg, allowlist=set(),
+                                  approve=lambda p: True, ask=lambda q: "", observations=[],
+                                  max_steps=3, read_content=False)
+    assert status == "complete"
+    assert "navigate" not in captured["names"] and "click_element" not in captured["names"]
+    assert {"subgoal_complete", "scroll_page", "escalate"} <= captured["names"]
+
+
+# ----------------------------------------------------------------- fix 1: explore verified off candidates
+async def test_explore_complete_verifies_off_candidates(monkeypatch):
+    # On an explore subgoal, subgoal_complete is verified against the DOM candidate list — NOT the
+    # snapshot verifier (blind to the grid). 3 real rows -> complete; verify_success never called.
+    async def fake_dom(session, spec=None, *, max_items=40):
+        return [{"name": f"Book {i}", "price": "₹100", "rating": 4.5} for i in range(3)]
+
+    called = {"vs": 0}
+
+    async def fake_vs(*a, **k):
+        called["vs"] += 1
+        return (False, "snapshot is blind to the grid")
+
+    monkeypatch.setattr(orch, "extract_candidates_dom", fake_dom)
+    monkeypatch.setattr(orch, "verify_success", fake_vs)
+    sg = {"goal": "gather book listings", "success_condition": "5+ options with price & rating",
+          "type": "explore", "explore_spec": {"sources": ["amazon"], "target_count": 5}}
+    groq = FakeGroq([reasoner_resp("subgoal_complete")])
+    status, _ = await run_subgoal(groq, FakeSession(dom=_dom_payload()), [], sg, allowlist=set(),
+                                  approve=lambda p: True, ask=lambda q: "", observations=[],
+                                  max_steps=3, read_content=False)
+    assert status == "complete" and called["vs"] == 0
+
+
+# ----------------------------------------------------------------- fix 5: navigate semantic hard-stop
+async def test_repeated_navigate_hard_stops():
+    # The reasoner re-issues navigate to the same page (query varies, so it's not an exact repeat and
+    # not a single ping-pong) — the semantic loop guard hard-stops it instead of looping to budget.
+    acts = [reasoner_resp("navigate", f'{{"url": "https://test.local/checkout?isUnrec={i}"}}')
+            for i in range(5)]
+    sess = FakeSession(url="https://test.local/", dom=_dom_payload(url="https://test.local/"))
+    status, detail = await _run(FakeGroq(acts), sess, max_steps=8, read_content=False)
+    assert status == "escalate" and "loop" in detail
+    # the repeated navigate was blocked, not dispatched 5x
+    assert sum(1 for n, _ in sess.calls if n == "browser_navigate") <= 2
+
+
+# ----------------------------------------------------------------- fix 4: sign-in wall -> ask_human
+async def test_login_wall_hands_off_and_never_fills(monkeypatch):
+    events = []
+    asked = {"q": None}
+
+    def ask(q, **k):
+        asked["q"] = q
+        return "signed in"
+
+    sess = FakeSession(url="https://www.amazon.in/ap/signin",
+                       dom=_dom_payload(url="https://www.amazon.in/ap/signin"))
+    groq = FakeGroq([reasoner_resp("ask_human", '{"question": "please sign in to continue"}'),
+                     reasoner_resp("subgoal_complete"),
+                     content_resp('{"satisfied": true, "reason": "ok"}')])
+    status, _ = await run_subgoal(groq, sess, [], SUBGOAL, allowlist=set(), approve=lambda p: True,
+                                  ask=ask, observations=[], max_steps=4, read_content=False,
+                                  emit=events.append)
+    assert any(e["type"] == "login_wall" for e in events)        # detected the auth wall
+    assert asked["q"] is not None                                # handed off to the human
+    # NEVER typed into a credential field (no input_text setter was dispatched in-page)
+    fns = [a.get("function", "") for n, a in sess.calls if n == "browser_evaluate"]
+    assert not any("HTMLInputElement.prototype" in f for f in fns)
+
+
+# ----------------------------------------------------------------- fix 3/4: identity gate + add-to-cart
+async def test_wrong_product_rejected_by_identity(monkeypatch):
+    # The loaded page is a OnePlus product; the selected is the book (different ASIN). The identity
+    # gate REJECTS before the snapshot verifier (which would have passed "a product page").
+    called = {"vs": 0}
+
+    async def fake_vs(*a, **k):
+        called["vs"] += 1
+        return (True, "a product page loaded")
+
+    monkeypatch.setattr(orch, "verify_success", fake_vs)
+    sg = {"goal": "Open the selected product page", "success_condition": "product page loaded", "type": "act"}
+    selected = {"name": "Think and Grow Rich", "url": "https://www.amazon.in/dp/9389931525", "asin": "9389931525"}
+    sess = FakeSession(dom=_dom_payload(url="https://www.amazon.in/OnePlus/dp/B0ONEPLUS1/ref=x"))
+    groq = FakeGroq([reasoner_resp("subgoal_complete"), reasoner_resp("escalate", '{"reason": "wrong page"}')])
+    status, _ = await run_subgoal(groq, sess, [], sg, allowlist=set(), approve=lambda p: True,
+                                  ask=lambda q: "", observations=[], max_steps=4, read_content=False,
+                                  selected=selected)
+    assert status == "escalate" and called["vs"] == 0     # identity rejected, snapshot verifier untouched
+
+
+async def test_add_to_cart_deterministic_click_completes(monkeypatch):
+    # Fix 2: on an add-to-cart subgoal we find + click the Add-to-Cart control via the DOM at the TOP
+    # of the loop — the reasoner is NOT used to scroll-hunt for it (the regression). Once the on-page
+    # cart confirmation appears, the subgoal completes WITHOUT ever consulting the reasoner.
+    clicks = {"n": 0}
+
+    async def fake_click(session):
+        clicks["n"] += 1
+        return {"ok": True, "text": "Add to Cart"}
+
+    async def fake_cc(session, item_title=None):
+        return (True, "cart badge 1")
+
+    monkeypatch.setattr(orch, "click_add_to_cart", fake_click)
+    monkeypatch.setattr(orch, "cart_confirmed", fake_cc)
+    monkeypatch.setattr(orch.asyncio, "sleep", _noop_sleep)
+    sg = {"goal": "Add the book to the cart", "success_condition": "item in cart", "type": "act"}
+    groq = FakeGroq([])                                    # reasoner must never be called
+    status, _ = await run_subgoal(groq, FakeSession(dom=_dom_payload()), [], sg, allowlist=set(),
+                                  approve=lambda p: True, ask=lambda q: "", observations=[],
+                                  max_steps=4, read_content=False)
+    assert status == "complete" and clicks["n"] == 1
+    assert len(groq.calls) == 0                            # deterministic: the LLM reasoner was untouched
+
+
+async def test_add_to_cart_escalates_when_never_confirmed(monkeypatch):
+    # Clicked Add-to-Cart deterministically but the cart never confirms (sign-in wall / out of stock):
+    # after a few re-perceive polls it ESCALATES rather than scrolling or blindly re-navigating.
+    async def fake_click(session):
+        return {"ok": True, "text": "Add to Cart"}
+
+    async def fake_cc(session, item_title=None):
+        return (False, "no confirmation")
+
+    monkeypatch.setattr(orch, "click_add_to_cart", fake_click)
+    monkeypatch.setattr(orch, "cart_confirmed", fake_cc)
+    monkeypatch.setattr(orch.asyncio, "sleep", _noop_sleep)
+    sg = {"goal": "Add the book to the cart", "success_condition": "item in cart", "type": "act"}
+    status, detail = await run_subgoal(FakeGroq([]), FakeSession(dom=_dom_payload()), [], sg,
+                                       allowlist=set(), approve=lambda p: True, ask=lambda q: "",
+                                       observations=[], max_steps=8, read_content=False)
+    assert status == "escalate" and "never confirmed" in detail
+
+
+async def test_add_to_cart_button_absent_falls_through_to_reasoner(monkeypatch):
+    # When the Add-to-Cart button isn't on THIS page yet, the deterministic click no-ops and the
+    # reasoner drives (it would navigate to the product page). If it then declares done with no cart
+    # confirmation, the verifier rejects with a reason that forbids re-navigating (no product<->cart
+    # ping-pong).
+    async def fake_click(session):
+        return {"ok": False, "reason": "no add-to-cart button on this page"}
+
+    async def fake_cc(session, item_title=None):
+        return (False, "no confirmation")
+
+    monkeypatch.setattr(orch, "click_add_to_cart", fake_click)
+    monkeypatch.setattr(orch, "cart_confirmed", fake_cc)
+    monkeypatch.setattr(orch.asyncio, "sleep", _noop_sleep)
+    sg = {"goal": "Add the book to the cart", "success_condition": "item in cart", "type": "act"}
+    events = []
+    groq = FakeGroq([reasoner_resp("subgoal_complete"),
+                     reasoner_resp("escalate", '{"reason": "cannot confirm"}')])
+    status, _ = await run_subgoal(groq, FakeSession(dom=_dom_payload()), [], sg, allowlist=set(),
+                                  approve=lambda p: True, ask=lambda q: "", observations=[],
+                                  max_steps=4, read_content=False, emit=events.append)
+    assert status == "escalate"                            # complete refused while not confirmed
+    reasons = [e.get("reason", "") for e in events if e.get("type") == "verifier"]
+    assert any("Do NOT navigate" in r for r in reasons)
+
+
+async def test_cart_stage_blocks_navigate_back_to_product():
+    # At checkout, navigating BACK to the selected product page is the post-add ping-pong. The
+    # cart-stage guard BLOCKS that navigate (never dispatched) and nudges; with the page thus pinned,
+    # the run escalates instead of bouncing product<->cart.
+    selected = {"name": "Think and Grow Rich", "url": "https://www.amazon.in/dp/9389931525"}
+    sg = {"goal": "Proceed to checkout", "success_condition": "payment page", "type": "act"}
+    events = []
+    acts = [reasoner_resp("navigate", '{"url": "https://www.amazon.in/dp/9389931525"}') for _ in range(5)]
+    sess = FakeSession(url="https://www.amazon.in/gp/cart/view.html",
+                       dom=_dom_payload(url="https://www.amazon.in/gp/cart/view.html"))
+    status, _ = await run_subgoal(FakeGroq(acts), sess, [], sg, allowlist=set(), approve=lambda p: True,
+                                  ask=lambda q: "", observations=[], max_steps=8, read_content=False,
+                                  selected=selected, emit=events.append)
+    assert status == "escalate"
+    # the product-page navigate was BLOCKED, never dispatched
+    assert ("browser_navigate", {"url": "https://www.amazon.in/dp/9389931525"}) not in sess.calls
+    assert any(e.get("type") == "loop_nudge" and e.get("blocked") for e in events)
+
+
+async def test_add_to_cart_completes_on_confirmation(monkeypatch):
+    # End-to-end through the REAL click_add_to_cart eval seam (FakeSession returns ok for the in-page
+    # click): the deterministic click fires, then the on-page cart confirmation completes the subgoal.
+    async def fake_cc(session, item_title=None):
+        return (True, "cart badge 1")                      # post-add confirmation present
+
+    monkeypatch.setattr(orch, "cart_confirmed", fake_cc)
+    monkeypatch.setattr(orch.asyncio, "sleep", _noop_sleep)
+    sg = {"goal": "Add the book to the cart", "success_condition": "item in cart", "type": "act"}
+    groq = FakeGroq([reasoner_resp("subgoal_complete")])
+    status, _ = await run_subgoal(groq, FakeSession(dom=_dom_payload()), [], sg, allowlist=set(),
+                                  approve=lambda p: True, ask=lambda q: "", observations=[],
+                                  max_steps=3, read_content=False)
+    assert status == "complete"                            # confirmed on the current page
+
+
+# ----------------------------------------------------------------- fix 5: malformed-tool-call retry cap
+async def test_reasoner_recovers_after_many_wobbles():
+    # 7 consecutive tool_use_failed rejections then a valid call — the raised retry cap (8) recovers
+    # it instead of escalating the whole subgoal (this was the dominant cause of death).
+    groq = FakeGroq([_bad_request() for _ in range(7)] + [reasoner_resp("navigate", '{"url": "http://x"}')])
+    _, actions = await reasoner_decide(groq, [], SUBGOAL, "snap", [])
+    assert actions == [("navigate", {"url": "http://x"})]
+
+
+async def test_reasoner_emits_tool_use_failed_event():
+    # Fix 5a: each rejected tool call is surfaced to the trace via `emit`, with the attempt # and the
+    # error detail, so a debugger can see the wobble that almost killed the subgoal.
+    events = []
+    groq = FakeGroq([_bad_request("tool_use_failed: bad types"),
+                     reasoner_resp("navigate", '{"url": "http://x"}')])
+    _, actions = await reasoner_decide(groq, [], SUBGOAL, "snap", [], emit=events.append)
+    assert actions == [("navigate", {"url": "http://x"})]
+    tuf = [e for e in events if e["type"] == "tool_use_failed"]
+    assert tuf and tuf[0]["attempt"] == 1 and "bad types" in tuf[0]["detail"]
+
+
+# ----------------------------------------------------------------- fix 4: identity match is authoritative
+async def test_matching_product_passes_authoritatively(monkeypatch):
+    # When the loaded page IS the selected product (ASIN match), the identity check PASSES outright —
+    # the snapshot verifier is never consulted (it must not be able to override identity either way).
+    called = {"vs": 0}
+
+    async def fake_vs(*a, **k):
+        called["vs"] += 1
+        return (False, "snapshot says no")
+
+    monkeypatch.setattr(orch, "verify_success", fake_vs)
+    sg = {"goal": "Open the selected product page", "success_condition": "product page loaded", "type": "act"}
+    selected = {"name": "Think and Grow Rich", "url": "https://www.amazon.in/dp/9389931525",
+                "asin": "9389931525"}
+    sess = FakeSession(dom=_dom_payload(url="https://www.amazon.in/Think-Grow-Rich/dp/9389931525/ref=x"))
+    groq = FakeGroq([reasoner_resp("subgoal_complete")])
+    status, reason = await run_subgoal(groq, sess, [], sg, allowlist=set(), approve=lambda p: True,
+                                       ask=lambda q: "", observations=[], max_steps=4, read_content=False,
+                                       selected=selected)
+    assert status == "complete" and called["vs"] == 0      # identity authoritative; snapshot untouched
+    assert "selected product" in reason
+
+
+# ----------------------------------------------------------------- fix 3: a few scrolls don't hard-stop
+async def test_a_few_scrolls_do_not_trip_loop_hard_stop():
+    # Fix 3: a few exploratory scrolls must NOT hard-stop (the add-to-cart scroll-hunt regression that
+    # aborted the subgoal). 3 scrolls then complete -> completes; no loop_hard_stop is emitted.
+    groq = FakeGroq([reasoner_resp("scroll_page", '{"direction": "down"}'),
+                     reasoner_resp("scroll_page", '{"direction": "down"}'),
+                     reasoner_resp("scroll_page", '{"direction": "down"}'),
+                     reasoner_resp("subgoal_complete"),
+                     content_resp('{"satisfied": true, "reason": "ok"}')])
+    events = []
+    status, _ = await run_subgoal(groq, FakeSession(dom=_dom_payload(), dom_vary=True), [], SUBGOAL,
+                                  allowlist=set(), approve=lambda p: True, ask=lambda q: "",
+                                  observations=[], max_steps=8, read_content=False, emit=events.append)
+    assert status == "complete"
+    assert not any(e["type"] == "loop_hard_stop" for e in events)
+
+
+# ----------------------------------------------------------------- fix 5a: deep per-turn trace
+async def test_trace_turn_emitted_with_observation_and_rationale(monkeypatch):
+    # With BROWSER_AGENT_LOG_LEVEL=DEBUG the loop emits a deep per-turn record: subgoal id/text, the
+    # observation summary (snapshot size, DOM flags, url, candidate count), the rationale, and raw args.
+    monkeypatch.setenv("BROWSER_AGENT_LOG_LEVEL", "DEBUG")
+    events = []
+    sg = {"id": 7, "goal": "do the thing", "success_condition": "done", "type": "act"}
+    groq = FakeGroq([reasoner_resp("click_element", '{"index": 2}', thought="I will click result 2"),
+                     reasoner_resp("escalate", '{"reason": "stop"}')])
+    await run_subgoal(groq, FakeSession(dom=_dom_payload(url="http://shop.local/dp/x")), [], sg,
+                      allowlist=set(), approve=lambda p: True, ask=lambda q: "", observations=[],
+                      max_steps=2, read_content=False, emit=events.append)
+    traces = [e for e in events if e["type"] == "trace_turn"]
+    assert traces
+    t = traces[0]
+    assert t["subgoal_id"] == 7 and t["subgoal_text"] == "do the thing"
+    assert t["rationale"] == "I will click result 2"
+    assert t["action"] == "click_element" and t["actions"][0]["args"] == {"index": 2}
+    obs = t["observation"]
+    assert obs["snapshot_chars"] > 0 and obs["dom_extracted"] is True
+    assert obs["url"] == "http://shop.local/dp/x" and "candidate_count" in obs
+
+
+async def test_trace_turn_not_emitted_at_info_level(monkeypatch):
+    # At the INFO default the deep trace stays OFF (the JSONL keeps just the high-level events).
+    monkeypatch.setenv("BROWSER_AGENT_LOG_LEVEL", "INFO")
+    events = []
+    groq = FakeGroq([reasoner_resp("escalate", '{"reason": "stop"}')])
+    await run_subgoal(groq, FakeSession(dom=_dom_payload()), [], SUBGOAL, allowlist=set(),
+                      approve=lambda p: True, ask=lambda q: "", observations=[], max_steps=2,
+                      read_content=False, emit=events.append)
+    assert not any(e["type"] == "trace_turn" for e in events)
+    assert any(e["type"] == "step" for e in events)        # the normal step event is still emitted
+
+
+async def test_verifier_event_carries_condition():
+    # Fix 5a: every verifier event names the success_condition it judged (for the trace).
+    groq = FakeGroq([reasoner_resp("subgoal_complete"),
+                     content_resp('{"satisfied": true, "reason": "ok"}')])
+    events = []
+    sg = {"goal": "g", "success_condition": "the results are visible", "type": "act"}
+    await run_subgoal(groq, FakeSession(), [], sg, allowlist=set(), approve=lambda p: True,
+                      ask=lambda q: "", observations=[], max_steps=3, read_content=False,
+                      emit=events.append)
+    v = [e for e in events if e["type"] == "verifier"]
+    assert v and v[0].get("condition") == "the results are visible"
+
+
+# ----------------------------------------------------------------- fix 5b: compact reasoning trail
+async def test_reasoner_trail_capped_and_surfaces_last_rejection():
+    # The trail fed back to the model is the LAST few actions (each collapsed + length-capped), plus
+    # the last verifier rejection surfaced on its own line — NOT a dump of the full JSONL trace.
+    from browser_agent.agent.reasoner import _TRAIL_KEEP
+    groq = FakeGroq([reasoner_resp("scroll_page", '{"direction": "down"}')])
+    recent = [f"action number {i} " + "x" * 300 for i in range(_TRAIL_KEEP + 4)]
+    await reasoner_decide(groq, [], SUBGOAL, "snap", recent,
+                          last_rejection="add-to-cart not confirmed: no badge. Do NOT navigate.")
+    prompt = groq.calls[0]["messages"][1]["content"]
+    assert "Last completion was REJECTED" in prompt and "Do NOT navigate" in prompt
+    assert "action number 0 " not in prompt                       # earliest dropped (only last N kept)
+    assert f"action number {_TRAIL_KEEP + 3} " in prompt          # the most recent is kept
+    assert "x" * 200 not in prompt                                # per-line cap truncated the long lines
+
+
+async def test_reasoner_trail_omits_rejection_block_when_none():
+    groq = FakeGroq([reasoner_resp("scroll_page", '{"direction": "down"}')])
+    await reasoner_decide(groq, [], SUBGOAL, "snap", ["did a thing"])
+    prompt = groq.calls[0]["messages"][1]["content"]
+    assert "Last completion was REJECTED" not in prompt           # nothing rejected -> no block

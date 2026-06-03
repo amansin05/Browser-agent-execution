@@ -7,7 +7,11 @@ tabs.
 
 import asyncio
 import json
+from collections import deque
 
+from browser_agent.agent.dom_extract import (
+    cart_confirmed, cart_count, click_add_to_cart, extract_candidates_dom, extract_with_scroll,
+)
 from browser_agent.agent.dom_index import execute_action, index_dom, is_terminating
 from browser_agent.agent.extract import extract_candidates, select_candidates, synthesize_options
 from browser_agent.agent.gather import gather_parallel
@@ -15,15 +19,15 @@ from browser_agent.agent.grounding import web_grounding
 from browser_agent.agent.planner import plan_subgoals
 from browser_agent.agent.reader import readable_text
 from browser_agent.agent.reasoner import reasoner_decide
-from browser_agent.agent.verifier import verify_success
+from browser_agent.agent.verifier import verify_candidates, verify_product_match, verify_success
 from browser_agent.config import COMPOSITION_MODEL, MODEL, PLANNER_MODEL
-from browser_agent.log import get_logger
+from browser_agent.log import get_logger, trace_enabled
 from browser_agent.services.mcp_client import (
-    full_snapshot, list_tabs_state, newest_new_tab, observe, open_session, select_tab,
+    full_snapshot, list_tabs_state, newest_new_tab, observe, open_session, resolve_url, select_tab,
 )
 from browser_agent.utils.domains import domain_allowed, domain_of
 from browser_agent.utils.io import maybe_await
-from browser_agent.utils.text import page_looks_blocked, snapshot_is_sufficient
+from browser_agent.utils.text import page_looks_blocked, page_looks_like_login, snapshot_is_sufficient
 
 log = get_logger(__name__)
 
@@ -76,6 +80,95 @@ STAGNATION_LIMIT = 3
 # escalate rather than fritter the tail away (browser-use's 75% budget nudge).
 BUDGET_WARN_FRACTION = 0.75
 
+# Ping-pong guard (fix 4a/5): a `navigate` to a URL the agent is currently on or has been on within
+# the last few steps is the click->product->navigate-back-to-search bounce. We BLOCK that redundant
+# navigation and nudge; after this many such revisits in a subgoal we escalate (anti-runaway).
+URL_REVISIT_WINDOW = 6
+MAX_REVISIT_NUDGES = 3
+
+# Fix 4b: on an EXPLORE subgoal, once the live DOM yields at least this many candidate rows the
+# listing has loaded — we drop `navigate`/`click_element` from that turn's tools so the reasoner
+# completes instead of clicking into a product (which starts the click<->navigate ping-pong). The
+# candidates are read off the page automatically on completion.
+EXPLORE_LISTING_MIN = 5
+
+
+# A subgoal that moves to checkout / payment (fix 3). We gate these on a non-empty cart so the agent
+# never navigates to /checkout having never confirmed the item was added (the blind-checkout bug).
+_CHECKOUT_PHRASES = ("checkout", "check out", "proceed to pay", "proceed to buy", "place order",
+                     "place the order", "make payment", "payment", "pay now")
+
+
+def _is_checkout(sg: dict) -> bool:
+    if sg.get("type", "act") != "act":
+        return False
+    goal = (sg.get("goal") or "").lower()
+    return any(p in goal for p in _CHECKOUT_PHRASES)
+
+
+_ADD_TO_CART_PHRASES = ("add to cart", "add to bag", "add to basket", "add it to the cart",
+                        "add the", "put in the cart")
+
+
+def _is_add_to_cart(sg: dict) -> bool:
+    if sg.get("type", "act") != "act":
+        return False
+    goal = (sg.get("goal") or "").lower()
+    return ("cart" in goal or "bag" in goal or "basket" in goal) and not _is_checkout(sg)
+
+
+def _is_cart_stage(sg: dict) -> bool:
+    """A subgoal at the CART/CHECKOUT stage — the item is expected to be in the cart ALREADY, so the
+    agent must NOT navigate back to the product page (the post-add product<->cart ping-pong). True for
+    checkout subgoals and for cart/bag subgoals that aren't an 'add' (e.g. 'go to cart', 'checkout')."""
+    if sg.get("type", "act") != "act":
+        return False
+    goal = (sg.get("goal") or "").lower()
+    if _is_checkout(sg):
+        return True
+    return ("cart" in goal or "bag" in goal or "basket" in goal) and "add" not in goal
+
+
+def _selected_note(selected, sg=None) -> str:
+    """A `### Selected product` block telling the reasoner the EXACT product it already chose, with
+    its absolute URL — so a post-selection act subgoal navigates straight to it (fix 2) instead of
+    re-searching and clicking a stray result by an unstable index (the OnePlus-page bug). At the
+    CART/CHECKOUT stage the item is already in the cart, so the note instead FORBIDS navigating back
+    to the product page (the post-add product<->cart ping-pong)."""
+    if not (isinstance(selected, dict) and selected.get("url")):
+        return ""
+    title = selected.get("name") or selected.get("title") or "the selected item"
+    price = f" (price {selected['price']})" if selected.get("price") else ""
+    if isinstance(sg, dict) and _is_cart_stage(sg):
+        return ("\n### Selected product\n"
+                f"The selected item \"{title}\"{price} should ALREADY be in the cart. Do NOT navigate "
+                f"back to its product page ({selected['url']}) — work with the cart / checkout on the "
+                f"current page; if the cart looks empty, escalate rather than re-opening the product.")
+    return ("\n### Selected product\n"
+            f"You have ALREADY chosen \"{title}\"{price}. Navigate to its URL ONCE to open it: "
+            f"{selected['url']} — do NOT search again or pick a different item. Do what the subgoal "
+            f"asks (e.g. click 'Add to Cart') on THAT page; the on-page 'Added to Cart' confirmation "
+            f"or the cart badge is success — then call subgoal_complete. Do NOT then re-navigate to "
+            f"the product or open the cart page.")
+
+
+def _norm_url(u: str) -> str:
+    """Normalize a URL for revisit/loop comparison: drop the query + fragment, lowercase, no trailing
+    slash. So `/s?k=x&qid=1` and `/s?k=x&qid=2` (the index-varying search bounce) compare equal."""
+    if not u:
+        return ""
+    return u.split("#", 1)[0].split("?", 1)[0].rstrip("/").lower()
+
+
+def _finalize_candidates(cands: list, base: str = "") -> list:
+    """Resolve each candidate's `url` to an absolute http(s) URL (reusing the navigate resolver),
+    flagging an unresolvable one as None. DOM rows already carry an absolute a.href (passes through);
+    LLM/a11y rows may be relative -> resolved against the page. The buy flow navigates by this url."""
+    for c in cands:
+        if isinstance(c, dict):
+            c["url"] = resolve_url(c.get("url") or "", base)
+    return cands
+
 
 def _expand_explore_sources(sg: dict) -> list[dict]:
     """Split one explore subgoal into one-subgoal-per-source so they can run in parallel. A planner
@@ -103,6 +196,45 @@ def _page_fingerprint(dom, url: str, snapshot_text: str):
     return ("a11y", url, hash(snapshot_text))
 
 
+async def _verify_complete(groq, session, subgoal, snapshot_text, model, *, selected=None,
+                           url="", page_title=""):
+    """Decide whether a subgoal_complete is genuine:
+      - GATHER/EXPLORE  -> against the DOM candidate list (snapshot is blind to the grid);
+      - any ACT with a SELECTED product -> IDENTITY is AUTHORITATIVE: the loaded page must BE that
+        product (ASIN/title). A match PASSES outright; a mismatch REJECTS. We do NOT fall through to
+        the snapshot verifier, which is fuzzy enough to wave a home/search page through (fix 4 — the
+        OnePlus-for-a-book bug + the "verifier passed on the home page" regression);
+      - ADD-TO-CART -> the cart itself (badge / post-add panel), not the snapshot;
+      - only WITHOUT a selection to match against -> the independent snapshot verifier."""
+    if subgoal.get("type") == "explore":
+        cands = await extract_candidates_dom(session)
+        return verify_candidates(cands, subgoal.get("explore_spec"))
+    identity = None
+    if selected and (selected.get("url") or selected.get("asin")):
+        ok, reason = verify_product_match(url, page_title, selected)
+        if not ok:
+            return False, reason            # wrong product loaded — reject regardless of page type
+        identity = reason                   # the loaded page IS the selected product (ASIN/title)
+    if _is_add_to_cart(subgoal):
+        # Confirm on the CURRENT page (badge / post-add panel / 'added to cart'), NOT by going to
+        # /cart (Amazon shows a smart-wagon interstitial, not the cart contents). On failure return a
+        # SPECIFIC reason that tells the reasoner NOT to re-navigate (fix 1/2). cart_confirmed is the
+        # authority here — identity (above) only guards that we're confirming the RIGHT product.
+        title = (selected or {}).get("name") or (selected or {}).get("title") if isinstance(selected, dict) else None
+        ok, signal = await cart_confirmed(session, title)
+        if ok:
+            return True, f"item added to cart ({signal})"
+        return False, (f"add-to-cart not confirmed: {signal}. Do NOT navigate to the product page or "
+                       "the cart — click 'Add to Cart' on the product page and let the on-page "
+                       "confirmation appear, then complete.")
+    if identity is not None:
+        # Identity matched and this isn't add-to-cart: the page IS the selected product, so the
+        # subgoal (open/inspect it) is genuinely complete. Authoritative — skip the snapshot verifier
+        # (`identity` already reads as a reason, e.g. "on the selected product (ASIN …)").
+        return True, identity
+    return await verify_success(groq, snapshot_text, subgoal["success_condition"], model=model)
+
+
 async def _approve_with_timeout(approve, prompt: str, timeout: float = APPROVAL_TIMEOUT) -> bool:
     """Await an approval, but treat no-answer-in-time as a denial. Sync (CLI) callbacks aren't
     timed (a human is at the terminal); async (web) ones are."""
@@ -117,19 +249,24 @@ async def _approve_with_timeout(approve, prompt: str, timeout: float = APPROVAL_
 
 async def run_subgoal(groq, session, reasoner_tools, subgoal, *, allowlist, approve, ask,
                       observations, max_steps, model=MODEL, read_content=True, emit=None,
-                      plan_context="") -> tuple[str, str]:
+                      plan_context="", selected=None) -> tuple[str, str]:
     """Drive one subgoal. Returns (status, detail) where status in
     {'complete','escalate','exhausted','denied'}. `emit(event_dict)` (optional) streams progress
     to a UI; prints are kept for the CLI. When `read_content` is set and a page's snapshot is too
     sparse to reason over, the content extractor (Readability.js -> trafilatura) turns the live page
     into clean text appended to the observation — this replaced the old screenshot/vision fallback."""
     emit = emit or (lambda e: None)
+    trace = trace_enabled()     # DEBUG/TRACE -> emit the deep per-turn record (obs summary + raw args)
     recent_actions: list[str] = []
     last_sig = None
     repeat = 0
     last_action = None
     name_repeat = 0
+    last_sem_sig = None         # (action, url-no-query) from the prior step (semantic loop, fix 5)
+    sem_repeat = 0
+    sem_loop_hits = 0           # times a semantic loop was blocked -> escalate when it persists
     complete_rejects = 0
+    last_rejection = ""         # the most recent verifier rejection reason, surfaced to the reasoner (5b)
     working_tab = None  # the tab the agent drives; we keep focus pinned here across new-tab popups
     previous_keys: set = set()  # interactive-element keys from the last step -> mark NEW ones (*)
     dom = None                  # the current indexed-DOM view (None when we fell back to a11y)
@@ -138,6 +275,19 @@ async def run_subgoal(groq, session, reasoner_tools, subgoal, *, allowlist, appr
     stagnant = 0                # consecutive steps the page hasn't changed despite acting
     budget_warned = False
     acted = False               # did the PRIOR step execute a page action? (gates stagnation)
+    visited_urls: deque = deque(maxlen=URL_REVISIT_WINDOW)  # normalized URLs the agent has been ON
+    revisit_nudges = 0          # times we blocked a navigate-back-to-a-recent-URL (ping-pong guard)
+    is_explore = subgoal.get("type") == "explore"
+    # At the cart/checkout stage the item is already added, so navigating BACK to the selected
+    # product page is the post-add ping-pong — block it (fix 2).
+    cart_stage = _is_cart_stage(subgoal)
+    selected_path = _norm_url(selected["url"]) if isinstance(selected, dict) and selected.get("url") else ""
+    is_add_to_cart = _is_add_to_cart(subgoal)
+    sel_title = ((selected or {}).get("name") or (selected or {}).get("title")) if isinstance(selected, dict) else None
+    atc_clicked = False         # add-to-cart: clicked the button deterministically (fix 2)?
+    atc_confirm_polls = 0       # how many re-perceives we've waited for the cart to confirm
+    listing_ready = False       # explore: a product grid is on the page -> restrict tools, complete
+    listing_announced = False   # so we tell the reasoner "listing is ready" only once
 
     for step in range(1, max_steps + 1):
         # Keep the agent and the user on the SAME tab. `working_tab` follows the tab a click opened
@@ -161,6 +311,9 @@ async def run_subgoal(groq, session, reasoner_tools, subgoal, *, allowlist, appr
         else:
             snapshot_text, url = await observe(session)
             previous_keys = set()
+        page_title = dom.title if dom is not None else ""   # for the product-identity verifier (fix 3)
+        content_appended = False    # did the readable-text extractor add to this step's observation?
+        cand_count = None           # DOM candidate count this step (set below when computed; for trace)
 
         # Append cleaned page text when there's little to act on (a content page / opaque app): the
         # reasoner needs something to read. Gate on the indexed view when we have one, else on the
@@ -174,6 +327,7 @@ async def run_subgoal(groq, session, reasoner_tools, subgoal, *, allowlist, appr
                           step, len(extra))
                 emit({"type": "extract", "step": step, "chars": len(extra)})
                 snapshot_text = f"{snapshot_text}\n\n### Extracted readable content\n{extra[:6000]}"
+                content_appended = True
 
         # --- stagnation guard: did the page change since last step despite us acting? ---
         # `acted` still holds whether the PRIOR step ran a page action; use it before resetting.
@@ -202,10 +356,78 @@ async def run_subgoal(groq, session, reasoner_tools, subgoal, *, allowlist, appr
                 f"move (navigate directly to the target), or escalate if you are stuck.")
             emit({"type": "budget_warning", "step": step, "max_steps": max_steps})
 
+        # Record the page we're on, for the navigate-back ping-pong guard below.
+        if url:
+            visited_urls.append(_norm_url(url))
+
+        # DETERMINISTIC ADD-TO-CART (fix 2): on an add-to-cart subgoal, find + click the Add-to-Cart
+        # control via the DOM the moment it's present on the page — the reasoner must NOT scroll-hunt
+        # for it (the regression where it scrolled 4x and hit the loop hard-stop). After clicking,
+        # CONFIRM on the current page (cart_confirmed) and complete; if it never confirms, escalate
+        # with a specific reason rather than scrolling/re-navigating. The reasoner is used only to
+        # NAVIGATE to the product page first (the selected-product note drives that).
+        if is_add_to_cart:
+            if atc_clicked:
+                ok, signal = await cart_confirmed(session, sel_title)
+                if ok:
+                    emit({"type": "verifier", "satisfied": True, "reason": signal,
+                          "condition": subgoal.get("success_condition", "")})
+                    return "complete", f"added to cart ({signal})"
+                atc_confirm_polls += 1
+                if atc_confirm_polls >= 3:
+                    return "escalate", ("clicked Add to Cart but the cart never confirmed — the add "
+                                        "may have failed (sign-in / out of stock); do not retry blindly")
+                await asyncio.sleep(0.8)            # let the AJAX / smart-wagon interstitial render
+                continue
+            res = await click_add_to_cart(session)
+            if res.get("ok"):
+                atc_clicked = True
+                recent_actions.append(f"clicked Add to Cart (deterministic) -> {res.get('text', 'ok')}")
+                emit({"type": "action_result", "action": "add_to_cart", "ok": True,
+                      "outcome": res.get("text", "ok")})
+                await asyncio.sleep(0.8)
+                continue                            # re-perceive: the page may go to the confirmation
+            # button not on this page yet -> fall through; the reasoner navigates to the product page.
+
+        # SIGN-IN WALL (fix 4): if we hit an auth page that ISN'T a planned login step, hand off to
+        # the human (ask_human routes to the in-page overlay / chat in extension mode) — never let the
+        # reasoner type fabricated credentials. Inform-only nudge; the no-fabrication prompt rule + the
+        # reasoner choosing ask_human do the rest.
+        goal_is_login = any(w in subgoal.get("goal", "").lower()
+                            for w in ("sign in", "log in", "login", "sign-in", "authenticate"))
+        if not goal_is_login and page_looks_like_login(snapshot_text, url):
+            recent_actions.append(
+                "SIGN-IN WALL: this is a login/authentication page. Do NOT type any email, password, "
+                "or other credentials, and do NOT invent values. Call ask_human so the user can sign "
+                "in, then continue.")
+            emit({"type": "login_wall", "step": step, "url": url})
+
+        # Fix 4b: on an EXPLORE subgoal, once a product grid is readable on the live DOM, drop
+        # `navigate` and `click_element` from this turn's tools so the reasoner completes here
+        # instead of clicking into a product (which starts the click<->navigate ping-pong). The
+        # candidates are read off the page automatically on completion (the DOM extractor salvage).
+        turn_tools = reasoner_tools
+        if trace or (is_explore and not listing_ready):
+            try:
+                cand_count = len(await extract_candidates_dom(session))
+            except Exception:  # best-effort — never block the turn on perception extras
+                cand_count = None
+        if is_explore and not listing_ready and cand_count is not None and cand_count >= EXPLORE_LISTING_MIN:
+            listing_ready = True
+        if listing_ready:
+            turn_tools = [t for t in reasoner_tools
+                          if t["function"]["name"] not in ("navigate", "click_element")]
+            if not listing_announced:
+                listing_announced = True
+                recent_actions.append(
+                    "LISTING READY: a product list is on this page and its candidates are read off "
+                    "automatically — call subgoal_complete now. Do NOT navigate away or click into a "
+                    "product.")
+
         acted = False  # reset for THIS step; set True below only if a page action runs
         thought, actions = await reasoner_decide(
-            groq, reasoner_tools, subgoal, snapshot_text, recent_actions, last_thought,
-            plan_context=plan_context, model=model)
+            groq, turn_tools, subgoal, snapshot_text, recent_actions, last_thought,
+            plan_context=plan_context, model=model, emit=emit, last_rejection=last_rejection)
         last_thought = thought
         actions = actions[:MAX_ACTIONS_PER_STEP]
         if not actions:                       # reasoner_decide always returns at least one
@@ -216,6 +438,20 @@ async def run_subgoal(groq, session, reasoner_tools, subgoal, *, allowlist, appr
         emit({"type": "step", "step": step, "thought": thought,
               "action": first_action, "args": actions[0][1],
               "actions": [{"action": n, "args": a} for n, a in actions]})
+        # DEEP TRACE (fix 5a): a complete per-turn record to disk for debugging a failed run —
+        # subgoal id/text, the observation summary the reasoner saw, its one-line rationale, and the
+        # RAW args of every action it chose. Gated on BROWSER_AGENT_LOG_LEVEL=DEBUG/TRACE so a normal
+        # run's JSONL stays small; the EventRecorder wired to `emit` persists it. Best-effort.
+        if trace:
+            emit({"type": "trace_turn", "step": step,
+                  "subgoal_id": subgoal.get("id"), "subgoal_text": subgoal.get("goal"),
+                  "observation": {"snapshot_chars": len(snapshot_text),
+                                  "dom_extracted": bool(dom is not None and dom.elements),
+                                  "dom_elements": (len(dom.elements) if dom is not None else 0),
+                                  "content_appended": content_appended,
+                                  "candidate_count": cand_count, "url": url},
+                  "rationale": (thought or "").strip()[:300], "action": first_action,
+                  "actions": [{"action": n, "args": a} for n, a in actions]})
 
         # --- a LEADING control action is the whole decision (any trailing actions are ignored) ---
         # Handled before loop detection so a legitimately repeated complete/ask isn't mistaken for a
@@ -229,9 +465,11 @@ async def run_subgoal(groq, session, reasoner_tools, subgoal, *, allowlist, appr
                 recent_actions.append(f"ask_human -> {answer!r}")
                 emit({"type": "ask_answer", "answer": answer})
                 continue
-            ok, reason = await verify_success(groq, snapshot_text, subgoal["success_condition"], model=model)
+            ok, reason = await _verify_complete(groq, session, subgoal, snapshot_text, model,
+                                                selected=selected, url=url, page_title=page_title)
             log.info("verifier: satisfied=%s (%s)", ok, reason[:80])
-            emit({"type": "verifier", "satisfied": ok, "reason": reason})
+            emit({"type": "verifier", "satisfied": ok, "reason": reason,
+                  "condition": subgoal.get("success_condition", "")})
             if ok:
                 return "complete", reason
             complete_rejects += 1
@@ -239,6 +477,7 @@ async def run_subgoal(groq, session, reasoner_tools, subgoal, *, allowlist, appr
                 # Standoff: stop letting the reasoner re-declare done forever. Hand back to the
                 # planner — for an explore subgoal, orchestrate still salvages whatever is on the page.
                 return "escalate", f"verifier refused completion {complete_rejects}x: {reason}"
+            last_rejection = reason
             recent_actions.append(f"subgoal_complete -> REJECTED by verifier: {reason}")
             continue
 
@@ -250,22 +489,44 @@ async def run_subgoal(groq, session, reasoner_tools, subgoal, *, allowlist, appr
         last_sig = sig
         name_repeat = name_repeat + 1 if first_action == last_action else 0
         last_action = first_action
+        # SEMANTIC signature (fix 5): the same action TYPE on the same page (URL with query + element
+        # index stripped). Catches index-varying repeats the exact-arg `repeat` misses — clicking
+        # result after result on one listing page, or re-issuing navigate to the same URL.
+        sem_sig = (first_action, _norm_url(url))
+        sem_repeat = sem_repeat + 1 if sem_sig == last_sem_sig else 0
+        last_sem_sig = sem_sig
 
         # BACKSTOP: the exact same action LOOP_HARD_STOP times running is a genuine infinite loop —
         # force an escalate so a stuck agent can't burn the whole budget. (repeat is 0 on the 1st.)
         if repeat + 1 >= LOOP_HARD_STOP:
+            emit({"type": "loop_hard_stop", "step": step, "kind": "exact", "signature": sig[:120]})
             return "escalate", f"loop backstop: repeated the exact same action {repeat + 1}x"
 
-        # INFORM: a developing loop just nudges the reasoner (it reads this next turn and decides).
-        # For an EXACT repeat (3rd+ identical), skip executing the redundant action and let it
-        # re-decide; for a loose name-loop (args vary, may still be progress) nudge but let it run.
-        if repeat >= 2 or name_repeat >= 3:
+        # LOOP HANDLING. An EXACT repeat (3rd+ identical batch) is HARD-STOPPED (fix 5): block the
+        # redundant action and re-decide. A SEMANTIC loop — the same NON-ADVANCING action on the same
+        # page — is hard-stopped and escalated when it persists. A repeated NAVIGATE to the same page
+        # is a real loop (3rd); a few exploratory SCROLLs are legitimate, so scroll is NOT early-blocked
+        # and only trips the semantic stop after ~5 in a row (fix 3) — the exact-repeat backstop above
+        # still ends an endless identical scroll. click/input/select on one page only nudge (a legit
+        # sequence: pick size -> colour -> add to cart).
+        sem_loop = (sem_repeat >= 2 and first_action == "navigate") or \
+                   (sem_repeat >= 4 and first_action == "scroll_page")
+        if repeat >= 2 or name_repeat >= 3 or sem_loop:
             recent_actions.append(
-                f"LOOP WARNING: you keep choosing {first_action} with no new progress. Reach the goal "
-                f"a DIFFERENT way — navigate DIRECTLY to a category/search-results URL, use the search "
-                f"box, or pick a different element. If you truly cannot progress, call escalate.")
+                f"LOOP: you keep choosing {first_action} with no new progress. Reach the goal a "
+                f"DIFFERENT way (a different element, or navigate to a different URL), or call "
+                f"subgoal_complete / escalate.")
             emit({"type": "loop_nudge", "step": step, "action": first_action})
-            if repeat >= 2:  # don't execute a redundant exact repeat — re-decide with the nudge
+            if sem_loop:
+                sem_loop_hits += 1
+                if sem_loop_hits >= 2:
+                    emit({"type": "loop_hard_stop", "step": step, "kind": "semantic",
+                          "signature": f"{first_action}@{_norm_url(url)}"})
+                    return "escalate", (f"semantic loop hard-stop: repeated {first_action} on "
+                                        f"{_norm_url(url)} despite nudges")
+            # Block the redundant action (re-decide) for exact repeats and navigate loops; let a few
+            # scrolls through (the backstop/semantic stop above still bound endless scrolling).
+            if (repeat >= 2 or sem_loop) and first_action != "scroll_page":
                 continue
 
         # --- execute the batch in order, behind the page-change guard (see dom_index) ---
@@ -280,15 +541,63 @@ async def run_subgoal(groq, session, reasoner_tools, subgoal, *, allowlist, appr
                 emit({"type": "ask_answer", "answer": answer})
                 break
             if action == "subgoal_complete":
-                ok, reason = await verify_success(groq, snapshot_text, subgoal["success_condition"], model=model)
-                emit({"type": "verifier", "satisfied": ok, "reason": reason})
+                ok, reason = await _verify_complete(groq, session, subgoal, snapshot_text, model,
+                                                    selected=selected, url=url, page_title=page_title)
+                emit({"type": "verifier", "satisfied": ok, "reason": reason,
+                      "condition": subgoal.get("success_condition", "")})
                 if ok:
                     return "complete", reason
                 complete_rejects += 1
                 if complete_rejects >= MAX_COMPLETE_REJECTS:
                     return "escalate", f"verifier refused completion {complete_rejects}x: {reason}"
+                last_rejection = reason
                 recent_actions.append(f"subgoal_complete -> REJECTED by verifier: {reason}")
                 break
+
+            # RESOLVE the navigate target first (fix 2): a scraped href is often relative
+            # (`/gp/product/…`), so origin-prefix it against the current page; reject a malformed /
+            # unresolvable target (`https://gp/…`, `javascript:`) so we never navigate somewhere broken.
+            if action == "navigate":
+                resolved = resolve_url(args.get("url", ""), url)
+                if not resolved:
+                    bad = args.get("url", "")
+                    recent_actions.append(f"navigate -> REJECTED: {bad!r} is not a usable URL "
+                                          "(relative links are resolved automatically; give a real path).")
+                    emit({"type": "action_result", "action": "navigate", "blocked": True,
+                          "outcome": f"rejected malformed url {bad!r}"})
+                    break  # re-decide next step
+                args = {**args, "url": resolved}
+
+                # POST-ADD GUARD (fix 2): at the cart/checkout stage, never navigate BACK to the
+                # selected product page — the item is already added; doing so is the product<->cart
+                # bounce. Block it with a specific reason; persistent attempts escalate (revisit cap).
+                if cart_stage and selected_path and _norm_url(resolved) == selected_path:
+                    revisit_nudges += 1
+                    msg = ("the item is already in the cart — do NOT go back to the product page. "
+                           "Confirm the cart / proceed to checkout here, or escalate if the cart is empty.")
+                    log.info("step %d: blocked navigate-back-to-product (cart stage)", step)
+                    recent_actions.append(f"navigate -> BLOCKED: {msg}")
+                    emit({"type": "loop_nudge", "step": step, "action": "navigate", "blocked": True})
+                    if revisit_nudges >= MAX_REVISIT_NUDGES:
+                        return "escalate", ("cart not confirmed and the agent kept returning to the "
+                                            "product page; the add-to-cart likely didn't register")
+                    break
+
+            # PING-PONG GUARD (fix 4a/5): a navigate to the page we're already on, or one we were on
+            # within the last few steps, is the click->product->navigate-back-to-search bounce. Block
+            # the redundant navigation, nudge, and re-decide; escalate only after repeated revisits.
+            if action == "navigate":
+                nt = _norm_url(args.get("url", ""))
+                if nt and nt in visited_urls:
+                    revisit_nudges += 1
+                    msg = (f"already on / recently visited {nt} — NOT re-navigating there. The listing "
+                           f"is here: read it and call subgoal_complete, or click a DIFFERENT element.")
+                    log.info("step %d: blocked navigate-back to %s (revisit #%d)", step, nt, revisit_nudges)
+                    recent_actions.append(f"navigate -> BLOCKED: {msg}")
+                    emit({"type": "loop_nudge", "step": step, "action": "navigate", "blocked": True})
+                    if revisit_nudges >= MAX_REVISIT_NUDGES:
+                        return "escalate", f"ping-pong: navigated back to a recent URL {revisit_nudges}x"
+                    break  # end the batch; re-perceive + re-decide next step
 
             # enforce the domain allowlist (only navigate / a link click can change origin)
             target_url = None
@@ -400,6 +709,7 @@ async def orchestrate(groq, session, reasoner_tools, capabilities, goal, *, allo
                 for sub in expanded:
                     cands = results.get(sub.get("id"), [])
                     if cands:
+                        _finalize_candidates(cands)   # DOM rows are absolute; just validate/flag
                         state["candidates"].extend(cands)
                         observations.append(
                             f"gathered {len(cands)} candidates from source (parallel)")
@@ -492,11 +802,40 @@ async def orchestrate(groq, session, reasoner_tools, capabilities, goal, *, allo
         prior_goals = [p["goal"] for p in plan[:i]]
         plan_context = (f"Subgoal {i + 1} of {len(plan)} in the overall plan."
                         + (f" Earlier subgoals already handled: {'; '.join(prior_goals[-4:])}."
-                           if prior_goals else ""))
+                           if prior_goals else "")
+                        # fix 2: once a product is selected, later act subgoals get its exact URL
+                        # (or, at the cart/checkout stage, a "don't go back to the product" note)
+                        + (_selected_note(state.get("selected"), sg) if sg_type != "explore" else ""))
+
+        # --- CART-CONFIRMATION GATE (fix 3): never run a checkout/payment subgoal until the item is
+        #     actually in the cart. The agent used to click an unstable "Proceed" index and navigate
+        #     straight to /checkout on an empty/unrecognized cart -> sign-in wall -> loop. If the cart
+        #     can't be confirmed non-empty, escalate so the planner re-routes to add-to-cart first. ---
+        if _is_checkout(sg):
+            count = await cart_count(session)
+            if not (isinstance(count, int) and count > 0):
+                detail = (f"cart not confirmed (count={count}) before checkout — the item isn't in the "
+                          f"cart yet. Add it to the cart and verify before proceeding to checkout.")
+                log.info("subgoal %s checkout gated: %s", sg["id"], detail)
+                emit({"type": "cart_gate", "id": sg["id"], "count": count})
+                emit({"type": "subgoal_end", "id": sg["id"], "status": "escalate", "detail": detail})
+                if replans >= max_replans:
+                    return f"Failed: exhausted re-plan budget at subgoal {sg['id']} ({detail})."
+                replans += 1
+                observations.append(detail)
+                plan = await plan_subgoals(groq, working_goal, capabilities, prior_plan=plan,
+                                           failed_id=sg["id"], reason=detail,
+                                           observations="; ".join(observations[-5:]),
+                                           preamble=preamble, model=PLANNER_MODEL)
+                _log_plan("plan revised (cart gate)", plan)
+                emit({"type": "replan", "n": replans, "reason": detail, "subgoals": plan})
+                i = 0
+                continue
+
         status, detail = await run_subgoal(
             groq, session, reasoner_tools, sg, allowlist=allowlist, approve=approve, ask=ask,
             observations=observations, max_steps=sg_steps, model=model, read_content=read_content,
-            emit=emit, plan_context=plan_context)
+            emit=emit, plan_context=plan_context, selected=state.get("selected"))
 
         if sg_type == "explore" and status != "denied":
             # Extract whatever listings are on the current page — even when the reasoner escalated
@@ -504,23 +843,31 @@ async def orchestrate(groq, session, reasoner_tools, capabilities, goal, *, allo
             # never called subgoal_complete), so SALVAGING those candidates beats throwing the whole
             # attempt away and re-planning from scratch (the failure mode that exhausted the budget
             # while real listings sat on the page).
-            # Use the FULL (untruncated) snapshot for extraction: products sit past the 12k cap on
-            # heavy retail pages, so observe()'s capped text yields 0 candidates (Amazon failure).
-            snapshot_text, page_url = await full_snapshot(session)
-            cands = await extract_candidates(groq, snapshot_text, sg.get("explore_spec"), model=model)
-            if not cands and read_content and not page_looks_blocked(snapshot_text):
-                # Heavy retail SPAs (Amazon/Flipkart/Reliance) render a product GRID that the a11y
-                # snapshot captures poorly — the reasoner reaches the listings page but extraction
-                # reads 0 from the noisy/truncated tree, so every source "fails" and the re-plan
-                # budget drains (the "i want to buy a phone" run). Give the content extractor
-                # (Readability -> trafilatura) a second pass over the live page text and re-extract.
-                extra = await readable_text(session)
-                if extra:
-                    cands = await extract_candidates(groq, extra, sg.get("explore_spec"), model=model)
-                    if cands:
-                        log.info("subgoal %s explore -> %d candidates salvaged via content extractor",
-                                 sg["id"], len(cands))
+            # DOM-FIRST extraction: read structured rows straight from the live product grid
+            # (agent/dom_extract) — deterministic, no LLM, no a11y-tree blindness (the Amazon
+            # "0 candidates despite a full results page" bug). Scroll-to-reveal handles lazy grids.
+            cands = await extract_with_scroll(session, sg.get("explore_spec"))
+            page_url = ""
             if cands:
+                log.info("subgoal %s explore -> %d candidates via DOM extractor", sg["id"], len(cands))
+            else:
+                # Fall back to the LLM a11y extractor (FULL untruncated snapshot — products sit past
+                # observe()'s 12k cap), then the Readability/innerText salvage, only if the DOM
+                # reader found nothing (an unknown site whose grid the generic heuristic missed).
+                snapshot_text, page_url = await full_snapshot(session)
+                cands = await extract_candidates(groq, snapshot_text, sg.get("explore_spec"), model=model)
+                if not cands and read_content and not page_looks_blocked(snapshot_text):
+                    extra = await readable_text(session)
+                    if extra:
+                        cands = await extract_candidates(groq, extra, sg.get("explore_spec"), model=model)
+                if cands:
+                    log.info("subgoal %s explore -> %d candidates via a11y/text fallback",
+                             sg["id"], len(cands))
+            if cands:
+                # Resolve every candidate's product url to an absolute http(s) URL (fix 1): DOM rows
+                # are already absolute (a.href); LLM/a11y rows may be relative -> resolve against the
+                # page. The buy flow navigates by this url, so an unresolvable one is flagged None.
+                _finalize_candidates(cands, page_url)
                 state["candidates"].extend(cands)  # accumulate across multiple explore subgoals
                 salvaged = " [salvaged]" if status != "complete" else ""
                 log.info("subgoal %s explore -> +%d candidates (%d total)%s",

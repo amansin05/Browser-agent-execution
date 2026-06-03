@@ -58,7 +58,7 @@ async def test_orchestrate_salvages_candidates_when_explore_escalates(monkeypatc
         return ("a page full of phone listings", "http://amazon.in/s")
 
     async def fake_extract(groq, snapshot, spec, *, model=None):
-        return [{"name": "Phone A", "source": "amazon"}]   # but listings ARE on the page
+        return [{"name": "Phone A", "source": "amazon", "url": "/dp/B0PHONE"}]  # relative url
 
     async def fake_synth(groq, goal, cands, selected=None, *, model=None):
         seen["cands"] = cands
@@ -68,6 +68,9 @@ async def test_orchestrate_salvages_candidates_when_explore_escalates(monkeypatc
     monkeypatch.setattr(orch, "run_subgoal", fake_run)
     monkeypatch.setattr(orch, "observe", fake_observe)
     monkeypatch.setattr(orch, "full_snapshot", fake_observe)  # explore extraction reads the full snapshot
+    async def _no_dom(session, spec=None, **k):
+        return []
+    monkeypatch.setattr(orch, "extract_with_scroll", _no_dom)
     monkeypatch.setattr(orch, "extract_candidates", fake_extract)
     monkeypatch.setattr(orch, "synthesize_options", fake_synth)
 
@@ -75,7 +78,8 @@ async def test_orchestrate_salvages_candidates_when_explore_escalates(monkeypatc
     # The explore escalated, but candidates on the page were salvaged -> present ran -> we get a
     # shortlist instead of "Failed: exhausted re-plan budget".
     assert result == "## Shortlist\n- Phone A"
-    assert seen["cands"] == [{"name": "Phone A", "source": "amazon"}]
+    # the relative product url was resolved to absolute against the page (fix 1)
+    assert seen["cands"] == [{"name": "Phone A", "source": "amazon", "url": "http://amazon.in/dp/B0PHONE"}]
 
 
 async def test_orchestrate_salvages_via_content_extractor(monkeypatch):
@@ -97,7 +101,8 @@ async def test_orchestrate_salvages_via_content_extractor(monkeypatch):
     async def fake_extract(groq, snapshot, spec, *, model=None):
         calls["extract"] += 1
         # first call (raw snapshot) -> nothing; second call (readable text) -> candidates
-        return [] if calls["extract"] == 1 else [{"name": "Galaxy M14", "source": "flipkart"}]
+        return [] if calls["extract"] == 1 else [
+            {"name": "Galaxy M14", "source": "flipkart", "url": "https://www.flipkart.com/m14/p/itm1"}]
 
     async def fake_readable(session):
         return "# Mobiles\nGalaxy M14 5G Rs 12,999\nRedmi 13C Rs 9,499"
@@ -110,13 +115,17 @@ async def test_orchestrate_salvages_via_content_extractor(monkeypatch):
     monkeypatch.setattr(orch, "run_subgoal", fake_run)
     monkeypatch.setattr(orch, "observe", fake_observe)
     monkeypatch.setattr(orch, "full_snapshot", fake_observe)  # explore extraction reads the full snapshot
+    async def _no_dom(session, spec=None, **k):
+        return []
+    monkeypatch.setattr(orch, "extract_with_scroll", _no_dom)
     monkeypatch.setattr(orch, "extract_candidates", fake_extract)
     monkeypatch.setattr(orch, "readable_text", fake_readable)
     monkeypatch.setattr(orch, "synthesize_options", fake_synth)
 
     result = await _orchestrate(read_content=True)
     assert result == "## Shortlist\n- Galaxy M14"
-    assert seen["cands"] == [{"name": "Galaxy M14", "source": "flipkart"}]
+    assert seen["cands"] == [{"name": "Galaxy M14", "source": "flipkart",
+                              "url": "https://www.flipkart.com/m14/p/itm1"}]
     assert calls["extract"] == 2          # raw snapshot, then content-extractor re-pass
 
 
@@ -140,6 +149,9 @@ async def test_orchestrate_does_not_present_empty_when_explore_finds_nothing(mon
     monkeypatch.setattr(orch, "run_subgoal", fake_run)
     monkeypatch.setattr(orch, "observe", fake_observe)
     monkeypatch.setattr(orch, "full_snapshot", fake_observe)  # explore extraction reads the full snapshot
+    async def _no_dom(session, spec=None, **k):
+        return []
+    monkeypatch.setattr(orch, "extract_with_scroll", _no_dom)
     monkeypatch.setattr(orch, "extract_candidates", fake_extract)
 
     result = await _orchestrate(max_replans=1)
@@ -179,6 +191,9 @@ async def test_orchestrate_steers_replan_away_from_blocked_source(monkeypatch):
     monkeypatch.setattr(orch, "run_subgoal", fake_run)
     monkeypatch.setattr(orch, "observe", fake_observe)
     monkeypatch.setattr(orch, "full_snapshot", fake_observe)  # explore extraction reads the full snapshot
+    async def _no_dom(session, spec=None, **k):
+        return []
+    monkeypatch.setattr(orch, "extract_with_scroll", _no_dom)
     monkeypatch.setattr(orch, "extract_candidates", fake_extract)
 
     await _orchestrate(max_replans=1)
@@ -289,3 +304,141 @@ async def test_orchestrate_fans_single_multisource_explore_into_parallel(monkeyp
     assert len(captured["subgoals"]) == 2
     assert len(captured["cands"]) == 2
     assert result == "## Shortlist"
+
+
+async def test_orchestrate_uses_dom_extractor_first(monkeypatch):
+    # Fix 1: the explore salvage reads candidates from the live DOM FIRST (deterministic). When that
+    # yields rows, the LLM a11y extractor must NOT be called at all.
+    seen = {"llm_extract": 0, "cands": None}
+
+    async def fake_plan(*a, **k):
+        return [_explore(), _present()]
+
+    async def fake_run(*a, **k):
+        return ("complete", "ok")
+
+    async def fake_dom_scroll(session, spec=None, **k):
+        return [{"name": "Think and Grow Rich", "price": "₹139", "rating": 4.5, "source": "amazon.in",
+                 "url": "https://www.amazon.in/dp/9389931525"}]
+
+    async def fake_llm_extract(groq, snapshot, spec, *, model=None):
+        seen["llm_extract"] += 1
+        return [{"name": "SHOULD_NOT_BE_USED"}]
+
+    async def fake_synth(groq, goal, cands, selected=None, *, model=None):
+        seen["cands"] = cands
+        return "## Shortlist\n- Think and Grow Rich"
+
+    monkeypatch.setattr(orch, "plan_subgoals", fake_plan)
+    monkeypatch.setattr(orch, "run_subgoal", fake_run)
+    monkeypatch.setattr(orch, "extract_with_scroll", fake_dom_scroll)
+    monkeypatch.setattr(orch, "extract_candidates", fake_llm_extract)
+    monkeypatch.setattr(orch, "synthesize_options", fake_synth)
+
+    result = await _orchestrate()
+    assert result.startswith("## Shortlist")
+    assert seen["cands"] == [{"name": "Think and Grow Rich", "price": "₹139", "rating": 4.5,
+                              "source": "amazon.in", "url": "https://www.amazon.in/dp/9389931525"}]
+    assert seen["llm_extract"] == 0          # DOM-first: the LLM a11y extractor was never invoked
+
+
+# ----------------------------------------------------------------- fix 3: cart-confirmation gate
+def _checkout_sg():
+    return {"id": 1, "type": "act", "goal": "Proceed to checkout and pay",
+            "success_condition": "order placed", "tier": "auto", "needs_approval": False}
+
+
+async def test_checkout_gated_when_cart_empty(monkeypatch):
+    # A checkout subgoal must NOT run with an empty/unconfirmed cart — it escalates -> re-plan.
+    plans = {"n": 0}
+    ran = {"run": 0}
+
+    async def fake_plan(*a, **k):
+        plans["n"] += 1
+        return [_checkout_sg()]
+
+    async def fake_run(*a, **k):
+        ran["run"] += 1
+        return ("complete", "ok")
+
+    async def fake_cart(session):
+        return 0                                  # confirmed empty
+
+    monkeypatch.setattr(orch, "plan_subgoals", fake_plan)
+    monkeypatch.setattr(orch, "run_subgoal", fake_run)
+    monkeypatch.setattr(orch, "cart_count", fake_cart)
+    result = await _orchestrate(max_replans=1)
+    assert ran["run"] == 0                         # checkout never executed on an empty cart
+    assert plans["n"] >= 2 and result.startswith("Failed")   # gated -> re-plan -> exhausted
+
+
+async def test_checkout_proceeds_when_cart_confirmed(monkeypatch):
+    ran = {"run": 0}
+
+    async def fake_plan(*a, **k):
+        return [_checkout_sg()]
+
+    async def fake_run(*a, **k):
+        ran["run"] += 1
+        return ("complete", "ok")
+
+    async def fake_cart(session):
+        return 2                                   # item(s) in the cart
+
+    monkeypatch.setattr(orch, "plan_subgoals", fake_plan)
+    monkeypatch.setattr(orch, "run_subgoal", fake_run)
+    monkeypatch.setattr(orch, "cart_count", fake_cart)
+    result = await _orchestrate()
+    assert ran["run"] == 1 and result == "Done."   # cart confirmed -> checkout runs
+
+
+# ----------------------------------------------------------------- fix 1/2: url finalize + selected note
+def test_finalize_candidates_resolves_and_flags():
+    cands = [{"name": "abs", "url": "https://www.amazon.in/dp/9389931525"},
+             {"name": "rel", "url": "/dp/B0X"},
+             {"name": "none", "url": None},
+             {"name": "bad", "url": "https://gp/x"}]
+    out = orch._finalize_candidates(cands, "https://www.amazon.in/s?k=x")
+    assert out[0]["url"] == "https://www.amazon.in/dp/9389931525"   # absolute passes through
+    assert out[1]["url"] == "https://www.amazon.in/dp/B0X"          # relative resolved to origin
+    assert out[2]["url"] is None                                    # missing -> flagged None
+    assert out[3]["url"] is None                                    # malformed (dotless host) rejected
+
+
+def test_selected_note_carries_url_and_title():
+    note = orch._selected_note({"name": "Think and Grow Rich",
+                                "url": "https://www.amazon.in/dp/9389931525", "price": "₹139"})
+    assert "Selected product" in note and "https://www.amazon.in/dp/9389931525" in note
+    assert "Think and Grow Rich" in note
+    assert orch._selected_note({"name": "no url"}) == "" and orch._selected_note(None) == ""
+
+
+async def test_selected_url_threaded_into_act_subgoal(monkeypatch):
+    captured = {}
+
+    async def fake_plan(*a, **k):
+        return [{"id": 1, "type": "exploit", "goal": "rank", "success_condition": "",
+                 "tier": "auto", "needs_approval": False},
+                {"id": 2, "type": "act", "goal": "Open the selected book and add to cart",
+                 "success_condition": "in cart", "tier": "auto", "needs_approval": False}]
+
+    async def fake_select(groq, goal, cands, **k):
+        return {"selected": {"name": "Think and Grow Rich",
+                             "url": "https://www.amazon.in/dp/9389931525"}, "top": [], "reason": "r"}
+
+    async def fake_run(groq, session, tools, sg, **k):
+        if sg.get("type") == "act":
+            captured["plan_context"] = k.get("plan_context", "")
+            captured["selected"] = k.get("selected")
+        return ("complete", "ok")
+
+    async def fake_cart(session):
+        return 1                                          # add-to-cart subgoal isn't checkout-gated, but be safe
+
+    monkeypatch.setattr(orch, "plan_subgoals", fake_plan)
+    monkeypatch.setattr(orch, "select_candidates", fake_select)
+    monkeypatch.setattr(orch, "run_subgoal", fake_run)
+    monkeypatch.setattr(orch, "cart_count", fake_cart)
+    await _orchestrate()
+    assert "https://www.amazon.in/dp/9389931525" in captured["plan_context"]   # fed the exact URL
+    assert captured["selected"]["url"].endswith("9389931525")                  # and the selected dict
