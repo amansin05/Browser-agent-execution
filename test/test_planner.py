@@ -112,3 +112,72 @@ async def test_replan_prompt_carries_failure_context():
     assert "failing at subgoal 1" in user
     assert "amazon.in" in user and "avoid these" in user
     assert "blocked at amazon.in" in user
+
+
+# ----------------------------------------------------------------- fix 6: preserve the commit tail
+def _purchase_prior():
+    """A prior plan that ENDS in a purchase tail (add-to-cart -> secured checkout)."""
+    return [
+        {"id": 1, "type": "explore", "goal": "find the book", "success_condition": "list",
+         "tier": "auto", "needs_approval": False},
+        {"id": 2, "type": "act", "goal": "Add the book to the cart", "success_condition": "in cart",
+         "tier": "auto", "needs_approval": False},
+        {"id": 3, "type": "act", "goal": "Proceed to checkout and pay", "success_condition": "order placed",
+         "tier": "secured", "needs_approval": True},
+    ]
+
+
+async def test_replan_reappends_dropped_commit_tail():
+    # The planner re-plans to JUST find -> show (drops the purchase). The guard must re-append the
+    # add-to-cart + secured checkout steps so the user's buy intent isn't silently lost.
+    groq = FakeGroq([content_resp(
+        '{"subgoals": [{"id": 1, "type": "explore", "goal": "find the book", "success_condition": "list"},'
+        '{"id": 2, "type": "present", "goal": "show options", "success_condition": "shown"}]}')])
+    plan = await plan_subgoals(groq, "buy the book Think and Grow Rich", ["navigate"],
+                               prior_plan=_purchase_prior(), failed_id=1, reason="amazon blocked")
+    goals = [sg["goal"].lower() for sg in plan]
+    assert any("cart" in g for g in goals)                       # add-to-cart preserved
+    assert any("checkout" in g or "pay" in g for g in goals)     # secured commit preserved
+    # the secured tier survives the round-trip (still needs approval before it runs)
+    assert any(sg.get("tier") == "secured" for sg in plan)
+
+
+async def test_replan_keeps_commit_tail_when_planner_already_has_it():
+    # If the re-plan ALREADY contains a commit step, we must NOT duplicate the tail.
+    groq = FakeGroq([content_resp(
+        '{"subgoals": [{"id": 1, "type": "explore", "goal": "find it", "success_condition": "list"},'
+        '{"id": 2, "type": "act", "goal": "Add to cart and checkout", "success_condition": "done",'
+        ' "tier": "secured", "needs_approval": true}]}')])
+    plan = await plan_subgoals(groq, "buy it", ["navigate"],
+                               prior_plan=_purchase_prior(), failed_id=1, reason="x")
+    assert sum(1 for sg in plan if "cart" in sg["goal"].lower() or "checkout" in sg["goal"].lower()) == 1
+
+
+async def test_replan_prompt_instructs_preserving_commit():
+    groq = FakeGroq([content_resp('{"subgoals": [{"id": 1, "goal": "g", "success_condition": "s"}]}')])
+    await plan_subgoals(groq, "buy it", ["navigate"], prior_plan=_purchase_prior(),
+                        failed_id=1, reason="x")
+    user = _user_msg(groq).lower()
+    assert "committing step" in user and ("cart" in user or "checkout" in user)
+
+
+async def test_replan_no_commit_tail_when_goal_is_research():
+    # A pure research re-plan (no commit in the prior plan) must NOT get a purchase tail bolted on.
+    prior = [{"id": 1, "type": "explore", "goal": "find phones", "success_condition": "list",
+              "tier": "auto", "needs_approval": False},
+             {"id": 2, "type": "present", "goal": "show options", "success_condition": "shown",
+              "tier": "auto", "needs_approval": False}]
+    groq = FakeGroq([content_resp(
+        '{"subgoals": [{"id": 1, "type": "explore", "goal": "find phones", "success_condition": "list"},'
+        '{"id": 2, "type": "present", "goal": "show", "success_condition": "shown"}]}')])
+    plan = await plan_subgoals(groq, "compare phones", ["navigate"], prior_plan=prior, failed_id=1, reason="x")
+    assert all(sg["type"] in ("explore", "present") for sg in plan)   # no commit step injected
+
+
+# ----------------------------------------------------------------- fix 4: no over-decomposition
+def test_enhanced_planner_discourages_over_decomposition():
+    p = ENHANCED_PLANNER.lower()
+    assert "over-decompose" in p or "over decompose" in p
+    # filtering/sorting must be folded into the gather step, not separate subgoals
+    assert "filter" in p and "sort" in p
+    assert "explore" in p and "exploit" in p          # the recommended compact shape
