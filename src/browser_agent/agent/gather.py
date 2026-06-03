@@ -15,6 +15,7 @@ need your real session still run on the live browser.
 
 import asyncio
 
+from browser_agent.agent.dom_extract import extract_with_scroll
 from browser_agent.agent.extract import extract_candidates
 from browser_agent.agent.reader import readable_text
 from browser_agent.config import MODEL
@@ -47,12 +48,15 @@ async def _gather_one_source(groq, reasoner_tools, sg, *, allowlist, max_steps, 
         await run_subgoal(groq, sess, reasoner_tools, sg, allowlist=allowlist,
                           approve=_auto_approve, ask=_auto_ask, observations=[],
                           max_steps=max_steps, model=model, read_content=read_content, emit=None)
-        snap, _url = await full_snapshot(sess)
-        cands = await extract_candidates(groq, snap, sg.get("explore_spec"), model=model)
-        if not cands and read_content and not page_looks_blocked(snap):
-            extra = await readable_text(sess)
-            if extra:
-                cands = await extract_candidates(groq, extra, sg.get("explore_spec"), model=model)
+        # DOM-first (deterministic, reads the live grid); a11y/text LLM extraction only as fallback.
+        cands = await extract_with_scroll(sess, sg.get("explore_spec"))
+        if not cands:
+            snap, _url = await full_snapshot(sess)
+            cands = await extract_candidates(groq, snap, sg.get("explore_spec"), model=model)
+            if not cands and read_content and not page_looks_blocked(snap):
+                extra = await readable_text(sess)
+                if extra:
+                    cands = await extract_candidates(groq, extra, sg.get("explore_spec"), model=model)
         return cands
 
 

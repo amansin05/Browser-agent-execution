@@ -60,6 +60,23 @@ def page_looks_blocked(snapshot_text: str) -> str | None:
     return None
 
 
+# A sign-in / authentication wall. URL path is the strong signal; the body needs BOTH a password cue
+# and a sign-in cue so a page that merely has a "Log in" nav link doesn't false-positive.
+_LOGIN_URL = re.compile(r"/(ap/signin|signin|sign-in|login|log-in|account/login|auth/|sso|oauth)", re.I)
+
+
+def page_looks_like_login(snapshot_text: str, url: str = "") -> bool:
+    """True if the current page is a sign-in / authentication wall. Used to hand off to the human
+    (ask_human) instead of letting the reasoner type fabricated credentials (extension mode is the
+    user's already-logged-in browser, so they can authenticate)."""
+    if _LOGIN_URL.search((url or "").lower()):
+        return True
+    low = (snapshot_text or "").lower()
+    has_pwd = "password" in low or 'type=password' in low or "type=\"password\"" in low
+    has_signin = any(s in low for s in ("sign in", "sign-in", "log in", "log-in", "signin"))
+    return has_pwd and has_signin
+
+
 def snapshot_is_sufficient(snapshot_text: str) -> bool:
     """Heuristic: is the DOM/accessibility snapshot usable on its own? A page that's a canvas,
     a CAPTCHA, or otherwise opaque to the a11y tree yields an empty/near-empty yaml body with no

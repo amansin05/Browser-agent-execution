@@ -8,6 +8,7 @@ import asyncio
 import os
 import re
 from contextlib import asynccontextmanager
+from urllib.parse import urljoin, urlparse
 
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
@@ -21,6 +22,36 @@ log = get_logger(__name__)
 def npx_command() -> str:
     """On Windows the npm shim is npx.cmd; a bare `npx` won't spawn via stdio."""
     return "npx.cmd" if os.name == "nt" else "npx"
+
+
+def _valid_host(netloc: str) -> bool:
+    """A navigable host: a dotted domain or localhost. Rejects bare hosts like `gp` that produce the
+    unresolvable `https://gp/product/...` (a scraped relative href that wasn't origin-prefixed)."""
+    host = (netloc or "").split("@")[-1].split(":")[0].lower()
+    return ("." in host and not host.endswith(".")) or host in ("localhost", "127.0.0.1")
+
+
+def resolve_url(raw: str, base: str = "") -> str | None:
+    """Resolve a navigate target. Returns an absolute http(s) URL, or None if it's malformed/unusable.
+
+    A scraped href is often RELATIVE (`/gp/product/B0…`); navigate must origin-prefix it against the
+    current page (urljoin) or it becomes `https://gp/product/…` → ERR_NAME_NOT_RESOLVED. Absolute
+    http(s) URLs pass through; a non-http scheme (javascript:/mailto:/…) or a bare/dotless host is
+    rejected so the reasoner re-decides instead of navigating somewhere broken."""
+    raw = (raw or "").strip()
+    if not raw:
+        return None
+    p = urlparse(raw)
+    if p.scheme in ("http", "https"):
+        return raw if _valid_host(p.netloc) else None
+    if p.scheme:                       # javascript:, mailto:, data:, tel:, about: … — not navigable
+        return None
+    if base:                           # relative ('/gp/product/…' or 'gp/product/…') -> join to origin
+        joined = urljoin(base, raw)
+        jp = urlparse(joined)
+        if jp.scheme in ("http", "https") and _valid_host(jp.netloc):
+            return joined
+    return None
 
 
 def build_server_params(use_extension: bool, browser: str, headless: bool = False) -> StdioServerParameters:
