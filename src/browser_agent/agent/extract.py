@@ -1,6 +1,7 @@
 """Explore-step extraction (B3): turn a page snapshot into a structured candidate list."""
 
 import json
+import re
 
 from browser_agent.agent.prompts import EXTRACTOR_SYSTEM, SELECTOR_SYSTEM, SYNTHESIZER_SYSTEM
 from browser_agent.config import COMPOSITION_MODEL, MODEL
@@ -9,6 +10,69 @@ from browser_agent.utils.text import extract_json
 
 log = get_logger(__name__)
 
+# Stopwords stripped from the goal when matching a candidate's title (fix 6 relevance filter).
+_GOAL_STOP = {"buy", "order", "get", "find", "me", "a", "an", "the", "and", "or", "of", "for", "to",
+              "in", "on", "online", "please", "want", "need", "book", "new", "best", "cheap",
+              "cheapest", "under", "with", "my", "some", "from", "at", "is", "it"}
+# Markers that a listing is a multi-item BUNDLE, not the single title the user asked for.
+_BUNDLE_MARKERS = ("set of", "pack of", "combo", "bundle", "(set", "books)", "2 books", "3 books",
+                   "4 books", "collection of")
+
+
+def _goal_terms(goal: str) -> list[str]:
+    return [w for w in re.findall(r"[a-z0-9]+", (goal or "").lower())
+            if len(w) > 2 and w not in _GOAL_STOP]
+
+
+def _name(c: dict) -> str:
+    return str(c.get("name") or c.get("title") or "").lower()
+
+
+def relevance_filter(goal: str, candidates: list[dict]) -> list[dict]:
+    """Drop candidates that don't match the goal BEFORE ranking (fix 6): wrong-language / unrelated
+    titles (too few of the goal's title words present — e.g. the Portuguese 'Quem pensa enriquece'
+    for 'Think and Grow Rich'), multi-book BUNDLES when a single title was asked for, and no-price
+    listings when priced options exist. Falls back to the full set if a filter would empty it, so we
+    never zero out the candidate pool."""
+    terms = _goal_terms(goal)
+    if not terms or not candidates:
+        return candidates
+    need = 1 if len(terms) <= 2 else 2
+    kept = [c for c in candidates if sum(1 for t in terms if t in _name(c)) >= need]
+    if not kept:
+        return candidates                       # goal terms matched nothing — don't over-filter
+    singular = not any(w in (goal or "").lower() for w in ("set", "bundle", "combo", "pack", "books"))
+    if singular:
+        no_bundle = [c for c in kept if not any(b in _name(c) for b in _BUNDLE_MARKERS)]
+        kept = no_bundle or kept
+    priced = [c for c in kept if c.get("price") not in (None, "")]
+    return priced or kept
+
+
+async def _chat_json(groq, system, user, *, model, max_completion_tokens, attempts=3):
+    """Call Scout for a JSON reply and parse it, RETRYING on a parse wobble — feed the bad reply +
+    the error back and ask for clean JSON, capped at `attempts`. Mirrors the planner's retry and the
+    flat agent's tool_use_failed recovery so ONE malformed reply never silently becomes zero results
+    (the old `except: return []` was exactly the "0 candidates" failure). Raises the last parse error
+    if every attempt fails; the caller decides the fallback."""
+    messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
+    last_err: Exception | None = None
+    for attempt in range(attempts):
+        resp = await groq.chat.completions.create(
+            model=model, temperature=0.0, max_completion_tokens=max_completion_tokens, messages=messages)
+        content = resp.choices[0].message.content
+        try:
+            return extract_json(content)
+        except (ValueError, TypeError) as e:
+            log.warning("JSON parse failed (attempt %d/%d): %r", attempt + 1, attempts, e)
+            last_err = e
+            messages.append({"role": "assistant", "content": content or ""})
+            messages.append({"role": "user", "content":
+                             "That could not be parsed as the required JSON (it may have been "
+                             "truncated or wrapped in prose). Reply with ONLY the JSON for the "
+                             "schema — no prose, no code fence, no <think>."})
+    raise last_err
+
 
 async def extract_candidates(groq, snapshot_text, explore_spec, *, model=MODEL) -> list[dict]:
     spec = explore_spec or {}
@@ -16,17 +80,15 @@ async def extract_candidates(groq, snapshot_text, explore_spec, *, model=MODEL) 
     # sidebar, so a tight head-slice cut the actual listings and yielded 0 candidates. The explore
     # path passes the FULL untruncated snapshot (full_snapshot), so allow a generous window — Scout
     # has a large context and products on Amazon/Flipkart appear well past the first 12k chars.
+    # NOTE: this is now the FALLBACK reader — the explore path tries DOM extraction (agent/dom_extract)
+    # first; this LLM/a11y pass only runs when the deterministic DOM reader found nothing.
     user = (f"Spec: {json.dumps(spec)}\n\n"
             f"Page snapshot:\n{snapshot_text[:40000]}\n\n"
             "Return the candidates as JSON.")
-    resp = await groq.chat.completions.create(
-        model=model, temperature=0.0, max_completion_tokens=1200,
-        messages=[{"role": "system", "content": EXTRACTOR_SYSTEM}, {"role": "user", "content": user}],
-    )
     try:
-        data = extract_json(resp.choices[0].message.content)
-    except Exception as e:
-        log.warning("extractor could not parse response (%r); 0 candidates", e)
+        data = await _chat_json(groq, EXTRACTOR_SYSTEM, user, model=model, max_completion_tokens=1200)
+    except Exception as e:  # only after the bounded retries — never on the first wobble
+        log.warning("extractor could not parse response after retries (%r); 0 candidates", e)
         return []
     cands = data.get("candidates", data) if isinstance(data, dict) else data
     result = [c for c in cands if isinstance(c, dict)] if isinstance(cands, list) else []
@@ -41,23 +103,26 @@ async def select_candidates(groq, goal, candidates, *, top_n=3, model=MODEL) -> 
     selection is always produced."""
     if not candidates:
         return {"selected": None, "top": [], "reason": "no candidates"}
-    user = (f"Goal: {goal}\n\nCandidates (0-based index):\n{json.dumps(candidates[:20])[:6000]}\n\n"
+    # Fix 6: filter to goal-relevant candidates (right title/language/format, has a price) BEFORE
+    # ranking, so the selector can't pick a wrong-language edition or a bundle just because it has the
+    # most reviews. Both the LLM selector and the deterministic fallback operate on this pool.
+    pool = relevance_filter(goal, candidates)
+    if len(pool) != len(candidates):
+        log.debug("relevance filter: %d -> %d candidates for %r", len(candidates), len(pool), goal[:60])
+    user = (f"Goal: {goal}\n\nCandidates (0-based index):\n{json.dumps(pool[:20])[:6000]}\n\n"
             f"Pick up to {top_n} best, best first.")
     try:
-        resp = await groq.chat.completions.create(
-            model=model, temperature=0.0, max_completion_tokens=300,
-            messages=[{"role": "system", "content": SELECTOR_SYSTEM}, {"role": "user", "content": user}])
-        data = extract_json(resp.choices[0].message.content)
-        idxs = [i for i in (data.get("top") or []) if isinstance(i, int) and 0 <= i < len(candidates)]
+        data = await _chat_json(groq, SELECTOR_SYSTEM, user, model=model, max_completion_tokens=300)
+        idxs = [i for i in (data.get("top") or []) if isinstance(i, int) and 0 <= i < len(pool)]
         if idxs:
-            top = [candidates[i] for i in idxs][:top_n]
+            top = [pool[i] for i in idxs][:top_n]
             return {"selected": top[0], "top": top, "reason": str(data.get("reason", "")).strip()}
         log.debug("selector returned no usable indices; falling back to scorer")
-    except Exception as e:
-        log.warning("LLM selection failed (%r); falling back to the deterministic scorer", e)
-    # Fallback: deterministic, rating-dominant scorer so we never fail to pick something.
+    except Exception as e:  # only after bounded retries
+        log.warning("LLM selection failed after retries (%r); falling back to the deterministic scorer", e)
+    # Fallback: deterministic, rating-dominant scorer over the SAME relevance-filtered pool.
     from browser_agent.agent.scoring import score_candidates
-    ranked = score_candidates(candidates, {"rating": 0.6, "review_count": 0.2, "price": 0.2})
+    ranked = score_candidates(pool, {"rating": 0.6, "review_count": 0.2, "price": 0.2})
     return {"selected": ranked[0] if ranked else None, "top": ranked[:top_n],
             "reason": "ranked by rating (deterministic fallback)"}
 
