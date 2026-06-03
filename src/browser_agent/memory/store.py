@@ -19,6 +19,23 @@ log = get_logger(__name__)
 
 DEFAULT_DIR = ".browser_agent_memory"
 
+
+def _jsonify(v):
+    """SQLite can't bind a dict/list ('type dict is not supported' — the parameter-5 `chosen` crash
+    once candidates became objects). JSON-encode any dict/list before binding; pass scalars through."""
+    return json.dumps(v, default=str, ensure_ascii=False) if isinstance(v, (dict, list)) else v
+
+
+def _unjson(v):
+    """Inverse of _jsonify on read: a value that looks like JSON ({...} or [...]) is decoded back to
+    its object; a plain string (older rows, or a genuine string) is returned unchanged."""
+    if isinstance(v, str) and v[:1] in ("{", "["):
+        try:
+            return json.loads(v)
+        except (ValueError, TypeError):
+            return v
+    return v
+
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS sessions (
   id TEXT PRIMARY KEY, created_at REAL, updated_at REAL, closed_at REAL, meta TEXT
@@ -81,7 +98,7 @@ class MemoryStore:
         with self._lock, self._db:
             self._db.execute(
                 "INSERT INTO messages(session_id, ts, role, content) VALUES(?,?,?,?)",
-                (session_id, time.time(), role, content),
+                (session_id, time.time(), role, _jsonify(content)),  # guard: never bind a raw dict/list
             )
             self._db.execute("UPDATE sessions SET updated_at=? WHERE id=?", (time.time(), session_id))
 
@@ -98,7 +115,7 @@ class MemoryStore:
         with self._lock, self._db:
             self._db.execute(
                 "INSERT INTO notes(session_id, ts, key, note) VALUES(?,?,?,?)",
-                (session_id, time.time(), key, note),
+                (session_id, time.time(), key, _jsonify(note)),  # guard: never bind a raw dict/list
             )
 
     def notes(self, session_id: str, limit: int = 30) -> list[str]:
@@ -131,14 +148,19 @@ class MemoryStore:
     # --- episodes (Tier-2: episodic history, append-only) -----------------------
     def add_episode(self, profile_id: str, task: str, outcome: str, *, chosen=None,
                     rejected=None, on_time=None, meta=None) -> None:
+        # `chosen` was a short string, but the reflect model now sometimes returns the selected
+        # candidate OBJECT (carries url/asin/...). Binding a raw dict crashed SQLite at parameter 5
+        # ("type 'dict' is not supported"). JSON-encode any dict/list (and guard task/outcome too).
         with self._lock, self._db:
             self._db.execute(
                 "INSERT INTO episodes(profile_id, ts, task, outcome, chosen, rejected, on_time, meta) "
                 "VALUES(?,?,?,?,?,?,?,?)",
-                (profile_id, time.time(), task, outcome, chosen,
+                (profile_id, time.time(), _jsonify(task), _jsonify(outcome), _jsonify(chosen),
                  json.dumps(rejected or []), None if on_time is None else int(bool(on_time)),
                  json.dumps(meta or {})),
             )
+        log.debug("memory write: episodes profile=%s keys=%s", profile_id,
+                  ["task", "outcome", "chosen", "rejected", "on_time"])
 
     def episodes(self, profile_id: str, limit: int = 100) -> list[dict]:
         with self._lock:
@@ -146,7 +168,7 @@ class MemoryStore:
                 "SELECT ts, task, outcome, chosen, rejected, on_time FROM episodes "
                 "WHERE profile_id=? ORDER BY id DESC LIMIT ?", (profile_id, limit)
             ).fetchall()
-        return [{"ts": ts, "task": t, "outcome": o, "chosen": c,
+        return [{"ts": ts, "task": _unjson(t), "outcome": _unjson(o), "chosen": _unjson(c),
                  "rejected": json.loads(r or "[]"), "on_time": ot}
                 for ts, t, o, c, r, ot in reversed(rows)]
 

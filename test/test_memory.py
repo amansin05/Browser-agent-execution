@@ -54,6 +54,37 @@ def test_end_and_list_sessions(store):
     assert sid in listed and listed[sid]["closed_at"] is not None
 
 
+# ----------------------------------------------------------------- episodes (dict-bind crash, fix 1)
+def test_episode_with_dict_chosen_roundtrips(store):
+    # Regression: the reflect model now returns the SELECTED CANDIDATE OBJECT as `chosen`. Binding a
+    # raw dict crashed SQLite at parameter 5 ("type 'dict' is not supported"). It must JSON-encode on
+    # write and decode back to a dict on read — no crash, value preserved.
+    pid = "user-1"
+    chosen = {"name": "Think and Grow Rich", "url": "https://www.amazon.in/dp/9389931525", "price": "₹139"}
+    store.add_episode(pid, "buy the book", "added to cart", chosen=chosen,
+                      rejected=[{"name": "Other"}], on_time=True)
+    eps = store.episodes(pid, 10)
+    assert len(eps) == 1
+    assert eps[0]["chosen"] == chosen                 # decoded back to the dict, not a string
+    assert eps[0]["task"] == "buy the book" and eps[0]["outcome"] == "added to cart"
+    assert eps[0]["rejected"] == [{"name": "Other"}]
+    assert eps[0]["on_time"] == 1
+
+
+def test_episode_with_string_chosen_stays_plain(store):
+    # A plain-string chosen (the older shape) round-trips unchanged — not JSON-wrapped.
+    pid = "user-2"
+    store.add_episode(pid, "task", "done", chosen="just a title")
+    assert store.episodes(pid, 10)[0]["chosen"] == "just a title"
+
+
+def test_episode_with_list_chosen_roundtrips(store):
+    # A list value is also JSON-encoded on the way in and decoded back out (no dict/list ever bound raw).
+    pid = "user-3"
+    store.add_episode(pid, "compare", "picked", chosen=["A", "B"])
+    assert store.episodes(pid, 10)[0]["chosen"] == ["A", "B"]
+
+
 # ----------------------------------------------------------------- rolling
 def test_rolling_window_turn_cap(store):
     sid = store.create_session()
