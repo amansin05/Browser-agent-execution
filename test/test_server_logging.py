@@ -37,6 +37,20 @@ def test_event_recorder_is_noop_without_writable_dir(tmp_path):
     assert rec.path is None or not rec.path.exists()
 
 
+def test_trace_enabled_reads_log_level(monkeypatch):
+    # The deep per-turn trace (fix 5a) is gated on BROWSER_AGENT_LOG_LEVEL ∈ {DEBUG, TRACE}; anything
+    # else (the INFO default) keeps it off so a normal run's JSONL stays small.
+    from browser_agent.log import trace_enabled
+    monkeypatch.delenv("BROWSER_AGENT_LOG_LEVEL", raising=False)
+    assert trace_enabled() is False                # default INFO -> off
+    monkeypatch.setenv("BROWSER_AGENT_LOG_LEVEL", "DEBUG")
+    assert trace_enabled() is True
+    monkeypatch.setenv("BROWSER_AGENT_LOG_LEVEL", "trace")
+    assert trace_enabled() is True                 # case-insensitive
+    monkeypatch.setenv("BROWSER_AGENT_LOG_LEVEL", "WARNING")
+    assert trace_enabled() is False
+
+
 def test_configure_logging_idempotent():
     a = configure_logging()
     n = len(a.handlers)

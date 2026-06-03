@@ -52,6 +52,13 @@ def configure_logging(level: str | None = None) -> logging.Logger:
     return logger
 
 
+def trace_enabled() -> bool:
+    """True when BROWSER_AGENT_LOG_LEVEL is DEBUG or TRACE — the gate for the *deep* per-turn trace
+    (subgoal/observation summary/raw args/verifier reasons). Default (INFO) keeps the JSONL stream
+    to the high-level events so a normal run's trace stays small; flip the env to get the firehose."""
+    return os.environ.get("BROWSER_AGENT_LOG_LEVEL", "INFO").upper() in ("DEBUG", "TRACE")
+
+
 def _stamp() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="milliseconds")
 
