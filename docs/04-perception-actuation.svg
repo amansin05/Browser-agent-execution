@@ -1,0 +1,58 @@
+<svg width="760" height="600" viewBox="0 0 760 600" xmlns="http://www.w3.org/2000/svg" font-family="ui-sans-serif, system-ui, sans-serif">
+<style>
+.th{font-size:13px;font-weight:600;fill:#1a1a1a}
+.ts{font-size:12px;fill:#555}
+.it{font-size:11px;fill:#888;font-style:italic}
+.lbl{font-size:11px;fill:#888}
+.arr{stroke:#888;stroke-width:1.5;fill:none}
+.arrx{stroke:#c98b7a;stroke-width:1.5;fill:none}
+</style>
+<defs>
+<marker id="a" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="#888" stroke-width="1.5"/></marker>
+<marker id="ax" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="#c98b7a" stroke-width="1.5"/></marker>
+</defs>
+<text x="30" y="24" text-anchor="start" font-size="15" font-weight="700" fill="#1a1a1a">The hands — how it sees (perceive) and acts (actuate)</text>
+<rect x="290" y="44" width="180" height="50" rx="8" fill="#fdecea" stroke="#eaa79c"/>
+<text class="th" x="380.0" y="70.0" text-anchor="middle">Brain</text>
+<text class="ts" x="380.0" y="84.0" text-anchor="middle">decides next action</text>
+<rect x="290" y="506" width="180" height="50" rx="8" fill="#e8f0fe" stroke="#9bb8e8"/>
+<text class="th" x="380.0" y="532.0" text-anchor="middle">Live Chrome</text>
+<text class="ts" x="380.0" y="546.0" text-anchor="middle">your real, logged-in tab</text>
+<rect x="14" y="110" width="360" height="372" rx="10" fill="none" stroke="#ccc" stroke-dasharray="4 4"/>
+<text class="it" x="28" y="130">PERCEPTION · observe  (no pixels — page becomes text)</text>
+<rect x="40" y="140" width="300" height="50" rx="8" fill="#e6f4f1" stroke="#8fc7bb"/>
+<text class="th" x="190.0" y="166.0" text-anchor="middle">① Indexed DOM — PRIMARY</text>
+<text class="ts" x="190.0" y="180.0" text-anchor="middle">numbers every clickable element</text>
+<line x1="190" y1="190" x2="190" y2="210" class="arr" marker-end="url(#a)"/>
+<rect x="40" y="212" width="300" height="50" rx="8" fill="#e6f4f1" stroke="#8fc7bb"/>
+<text class="th" x="190.0" y="238.0" text-anchor="middle">② Accessibility tree — fallback</text>
+<text class="ts" x="190.0" y="252.0" text-anchor="middle">a11y text dump if DOM view is thin</text>
+<line x1="190" y1="262" x2="190" y2="282" class="arr" marker-end="url(#a)"/>
+<rect x="40" y="284" width="300" height="56" rx="8" fill="#fdf3e3" stroke="#e8c98f"/>
+<text class="th" x="190.0" y="312.4" text-anchor="middle">③ Content extractor — text pages</text>
+<text class="ts" x="190.0" y="328.32" text-anchor="middle">Readability.js → trafilatura</text>
+<rect x="40" y="352" width="300" height="44" rx="8" fill="#f4f3f0" stroke="#cfccc4" stroke-dasharray="4 3"/>
+<text class="th" x="190.0" y="378.0" text-anchor="middle">✗ vision / screenshots — REMOVED</text>
+<text class="it" x="190" y="430" text-anchor="middle">→ clean observation</text>
+<text class="it" x="190" y="446" text-anchor="middle">sent up to the Brain</text>
+<rect x="386" y="110" width="360" height="372" rx="10" fill="none" stroke="#ccc" stroke-dasharray="4 4"/>
+<text class="it" x="400" y="130">ACTUATION · act  (a deliberately tiny tool set)</text>
+<rect x="412" y="140" width="300" height="70" rx="8" fill="#fdf3e3" stroke="#e8c98f"/>
+<text class="th" x="562.0" y="160" text-anchor="middle">5 page actions</text>
+<text class="ts" x="562.0" y="178" text-anchor="middle">click_element · input_text · select_option</text>
+<text class="ts" x="562.0" y="194" text-anchor="middle">scroll_page · navigate  (by [index])</text>
+<line x1="562" y1="210" x2="562" y2="230" class="arr" marker-end="url(#a)"/>
+<rect x="412" y="232" width="300" height="70" rx="8" fill="#f0e9f7" stroke="#c3a8df"/>
+<text class="th" x="562.0" y="252" text-anchor="middle">3 control signals</text>
+<text class="ts" x="562.0" y="270" text-anchor="middle">subgoal_complete · escalate</text>
+<text class="ts" x="562.0" y="286" text-anchor="middle">ask_human  (talk to the manager)</text>
+<text class="it" x="562" y="360" text-anchor="middle">the chosen action is</text>
+<text class="it" x="562" y="376" text-anchor="middle">performed in the tab</text>
+<path d="M300 508 L24 508 L24 196 L38 196" class="arr" marker-end="url(#a)"/>
+<text class="it" x="40" y="498" text-anchor="start">raw page →</text>
+<path d="M190 396 L190 470 L150 470 L150 70 L286 70" class="arr" marker-end="url(#a)"/>
+<path d="M470 70 L736 70 L736 174 L714 174" class="arr" marker-end="url(#a)"/>
+<text class="it" x="560" y="60" text-anchor="middle">chosen action →</text>
+<path d="M562 302 L562 420 L736 420 L736 540 L472 540" class="arr" marker-end="url(#a)"/>
+<text class="it" x="150" y="560" text-anchor="start">Loop: page → perceive → Brain decides → actuate → page changes → repeat.</text>
+</svg>

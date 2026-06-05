@@ -1,0 +1,42 @@
+<svg width="760" height="540" viewBox="0 0 760 540" xmlns="http://www.w3.org/2000/svg" font-family="ui-sans-serif, system-ui, sans-serif">
+<style>
+.th{font-size:13px;font-weight:600;fill:#1a1a1a}
+.ts{font-size:12px;fill:#555}
+.it{font-size:11px;fill:#888;font-style:italic}
+.lbl{font-size:11px;fill:#888}
+.arr{stroke:#888;stroke-width:1.5;fill:none}
+.arrx{stroke:#c98b7a;stroke-width:1.5;fill:none}
+</style>
+<defs>
+<marker id="a" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="#888" stroke-width="1.5"/></marker>
+<marker id="ax" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="#c98b7a" stroke-width="1.5"/></marker>
+</defs>
+<text x="30" y="24" text-anchor="start" font-size="15" font-weight="700" fill="#1a1a1a">The heartbeat — observe → decide → act</text>
+<rect x="280" y="44" width="200" height="50" rx="8" fill="#f4f3f0" stroke="#cfccc4"/>
+<text class="th" x="380.0" y="70.0" text-anchor="middle">Your task</text>
+<text class="ts" x="380.0" y="84.0" text-anchor="middle">plain-English goal</text>
+<line x1="380" y1="94" x2="380" y2="118" class="arr" marker-end="url(#a)"/>
+<rect x="250" y="120" width="260" height="64" rx="8" fill="#fdecea" stroke="#eaa79c"/>
+<text class="th" x="380.0" y="140" text-anchor="middle">Scout (Groq)</text>
+<text class="ts" x="380.0" y="158" text-anchor="middle">reads the page view,</text>
+<text class="ts" x="380.0" y="174" text-anchor="middle">picks ONE action per turn</text>
+<line x1="380" y1="184" x2="380" y2="214" class="arr" marker-end="url(#a)"/>
+<text class="it" x="392" y="204" text-anchor="start">decide → act</text>
+<rect x="250" y="216" width="260" height="60" rx="8" fill="#e6f4f1" stroke="#8fc7bb"/>
+<text class="th" x="380.0" y="246.0" text-anchor="middle">Playwright MCP</text>
+<text class="ts" x="380.0" y="263.2" text-anchor="middle">performs that single action</text>
+<line x1="380" y1="276" x2="380" y2="306" class="arr" marker-end="url(#a)"/>
+<rect x="250" y="308" width="260" height="60" rx="8" fill="#e8f0fe" stroke="#9bb8e8"/>
+<text class="th" x="380.0" y="338.0" text-anchor="middle">Your live Chrome</text>
+<text class="ts" x="380.0" y="355.2" text-anchor="middle">real, logged-in tab — state changes</text>
+<path d="M250 338 L80 338 L80 152 L246 152" class="arr" marker-end="url(#a)"/>
+<text class="it" x="96" y="300" text-anchor="start">page → clean view</text>
+<text class="it" x="96" y="286" text-anchor="start">OBSERVE again:</text>
+<path d="M510 150 L640 150 L640 60 L484 60" class="arrx" marker-end="url(#ax)"/>
+<text class="it" x="548" y="130" text-anchor="middle">when done</text>
+<rect x="560" y="36" width="180" height="48" rx="8" fill="#f0e9f7" stroke="#c3a8df"/>
+<text class="th" x="650.0" y="61.2" text-anchor="middle">Final answer</text>
+<text class="ts" x="650.0" y="74.56" text-anchor="middle">back to you</text>
+<text class="it" x="150" y="470" text-anchor="start">One action at a time — there is no ever-growing transcript; each turn gets a fresh view.</text>
+<text class="it" x="150" y="490" text-anchor="start">Re-planning, verifying and safety wrap around this same core loop.</text>
+</svg>

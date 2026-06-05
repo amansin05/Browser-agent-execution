@@ -1,0 +1,74 @@
+<svg width="1200" height="560" viewBox="0 0 1200 560" xmlns="http://www.w3.org/2000/svg" font-family="ui-sans-serif, system-ui, sans-serif">
+<style>
+.th{font-size:13px;font-weight:600;fill:#1a1a1a}
+.ts{font-size:12px;fill:#555}
+.it{font-size:11px;fill:#888;font-style:italic}
+.lbl{font-size:11px;fill:#888}
+.arr{stroke:#888;stroke-width:1.5;fill:none}
+.arrx{stroke:#c98b7a;stroke-width:1.5;fill:none}
+</style>
+<defs>
+<marker id="a" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="#888" stroke-width="1.5"/></marker>
+<marker id="ax" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="#c98b7a" stroke-width="1.5"/></marker>
+</defs>
+<text x="30" y="30" text-anchor="start" font-size="16" font-weight="700" fill="#1a1a1a">Browser Agent — the whole system at a glance</text>
+<text class="it" x="30" y="52" text-anchor="start">Safety throughout: risky steps pause for your approval; a domain allowlist blocks off-limits sites.</text>
+<rect x="30" y="250" width="110" height="70" rx="8" fill="#e8f0fe" stroke="#9bb8e8"/>
+<text class="th" x="85.0" y="284.0" text-anchor="middle">You</text>
+<text class="ts" x="85.0" y="304.4" text-anchor="middle">type a task</text>
+<rect x="168" y="250" width="150" height="70" rx="8" fill="#e8f0fe" stroke="#9bb8e8"/>
+<text class="th" x="243.0" y="270" text-anchor="middle">Chat UI + WS</text>
+<text class="ts" x="243.0" y="288" text-anchor="middle">React (dev-ui) +</text>
+<text class="ts" x="243.0" y="304" text-anchor="middle">FastAPI WebSocket</text>
+<rect x="348" y="245" width="156" height="80" rx="8" fill="#f0e9f7" stroke="#c3a8df"/>
+<text class="th" x="426.0" y="265" text-anchor="middle">Orchestrator</text>
+<text class="ts" x="426.0" y="283" text-anchor="middle">plan -&gt; reason -&gt; verify</text>
+<text class="ts" x="426.0" y="299" text-anchor="middle">-&gt; re-plan</text>
+<rect x="516" y="200" width="280" height="150" rx="10" fill="none" stroke="#ccc" stroke-dasharray="4 4"/>
+<text class="it" x="530" y="220">THE BRAIN — Groq, by role</text>
+<rect x="528" y="232" width="256" height="26" rx="8" fill="#fdecea" stroke="#eaa79c"/>
+<text class="th" x="656.0" y="249.0" text-anchor="middle">planner qwen3 · reasoner scout</text>
+<rect x="528" y="264" width="256" height="26" rx="8" fill="#fdf3e3" stroke="#e8c98f"/>
+<text class="th" x="656.0" y="281.0" text-anchor="middle">verifier · scorer · grounding</text>
+<rect x="528" y="296" width="256" height="26" rx="8" fill="#f0e9f7" stroke="#c3a8df"/>
+<text class="th" x="656.0" y="313.0" text-anchor="middle">composer gpt-oss · reflect</text>
+<rect x="816" y="200" width="300" height="150" rx="10" fill="none" stroke="#ccc" stroke-dasharray="4 4"/>
+<text class="it" x="830" y="220">THE HANDS — Playwright MCP server</text>
+<rect x="830" y="232" width="272" height="40" rx="8" fill="#e6f4f1" stroke="#8fc7bb"/>
+<text class="th" x="966.0" y="254.0" text-anchor="middle">PERCEPTION</text>
+<text class="ts" x="966.0" y="264.8" text-anchor="middle">indexed DOM · a11y tree · extractor</text>
+<rect x="830" y="286" width="272" height="48" rx="8" fill="#fdf3e3" stroke="#e8c98f"/>
+<text class="th" x="966.0" y="311.2" text-anchor="middle">ACTUATION</text>
+<text class="ts" x="966.0" y="324.56" text-anchor="middle">click · type · scroll · navigate (+ controls)</text>
+<rect x="856" y="410" width="220" height="70" rx="8" fill="#e8f0fe" stroke="#9bb8e8"/>
+<text class="th" x="966.0" y="430" text-anchor="middle">Your live Chrome</text>
+<text class="ts" x="966.0" y="448" text-anchor="middle">real, logged-in tab</text>
+<text class="ts" x="966.0" y="464" text-anchor="middle">via the Bridge extension</text>
+<rect x="348" y="400" width="436" height="130" rx="10" fill="none" stroke="#ccc" stroke-dasharray="4 4"/>
+<text class="it" x="362" y="420">MEMORY &amp; STATE — local SQLite</text>
+<rect x="362" y="430" width="200" height="40" rx="8" fill="#e7f3ea" stroke="#9ccaa6"/>
+<text class="th" x="462.0" y="454.0" text-anchor="middle">rolling context · scratchpad</text>
+<rect x="362" y="478" width="200" height="40" rx="8" fill="#e7f3ea" stroke="#9ccaa6"/>
+<text class="th" x="462.0" y="502.0" text-anchor="middle">session state (candidates)</text>
+<rect x="578" y="430" width="192" height="40" rx="8" fill="#f0e9f7" stroke="#c3a8df"/>
+<text class="th" x="674.0" y="454.0" text-anchor="middle">profile — persona · prefs</text>
+<rect x="578" y="478" width="192" height="40" rx="8" fill="#f4f3f0" stroke="#cfccc4"/>
+<text class="th" x="674.0" y="502.0" text-anchor="middle">per-run JSONL trace</text>
+<line x1="140" y1="285" x2="166" y2="285" class="arr" marker-end="url(#a)"/>
+<text class="it" x="146" y="276" text-anchor="start">task</text>
+<line x1="318" y1="285" x2="346" y2="285" class="arr" marker-end="url(#a)"/>
+<line x1="504" y1="285" x2="514" y2="285" class="arr" marker-end="url(#a)"/>
+<text class="it" x="470" y="274" text-anchor="start">decide</text>
+<line x1="796" y1="285" x2="814" y2="285" class="arr" marker-end="url(#a)"/>
+<text class="it" x="805" y="274" text-anchor="middle">act -&gt;</text>
+<path d="M921 334 L921 408" class="arr" marker-end="url(#a)"/>
+<text class="it" x="928" y="380" text-anchor="start">act</text>
+<path d="M1001 408 L1001 334" class="arr" marker-end="url(#a)"/>
+<text class="it" x="1008" y="380" text-anchor="start">observe</text>
+<path d="M628 350 L628 398" class="arr" marker-end="url(#a)"/>
+<text class="it" x="636" y="384" text-anchor="start">read / write</text>
+<path d="M470 398 L470 330" class="arr" marker-end="url(#a)"/>
+<text class="it" x="388" y="360" text-anchor="start">context -&gt;</text>
+<path d="M656 200 L656 178 L85 178 L85 248" class="arrx" marker-end="url(#ax)"/>
+<text class="it" x="380" y="172" text-anchor="middle">observation feeds the next decision  ·  final answer streams back to the UI</text>
+</svg>

@@ -1,0 +1,76 @@
+<svg width="760" height="760" viewBox="0 0 760 760" xmlns="http://www.w3.org/2000/svg" font-family="ui-sans-serif, system-ui, sans-serif">
+<style>
+.th{font-size:13px;font-weight:600;fill:#1a1a1a}
+.ts{font-size:12px;fill:#555}
+.it{font-size:11px;fill:#888;font-style:italic}
+.lbl{font-size:11px;fill:#888}
+.arr{stroke:#888;stroke-width:1.5;fill:none}
+.arrx{stroke:#c98b7a;stroke-width:1.5;fill:none}
+</style>
+<defs>
+<marker id="a" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="#888" stroke-width="1.5"/></marker>
+<marker id="ax" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="#c98b7a" stroke-width="1.5"/></marker>
+</defs>
+<text x="30" y="24" text-anchor="start" font-size="15" font-weight="700" fill="#1a1a1a">The two-tier brain — plan · reason · verify · re-plan</text>
+<rect x="14" y="40" width="732" height="130" rx="10" fill="none" stroke="#ccc" stroke-dasharray="4 4"/>
+<text class="it" x="28" y="60">PLAN — once per goal (re-run on escalate)</text>
+<rect x="40" y="70" width="210" height="64" rx="8" fill="#fdf3e3" stroke="#e8c98f"/>
+<text class="th" x="145.0" y="90" text-anchor="middle">Web grounding</text>
+<text class="ts" x="145.0" y="108" text-anchor="middle">quick search of the goal</text>
+<text class="ts" x="145.0" y="124" text-anchor="middle">→ anchors plan on real sites</text>
+<line x1="250" y1="102" x2="290" y2="102" class="arr" marker-end="url(#a)"/>
+<rect x="290" y="70" width="210" height="64" rx="8" fill="#fdecea" stroke="#eaa79c"/>
+<text class="th" x="395.0" y="90" text-anchor="middle">Planner · qwen3-32b</text>
+<text class="ts" x="395.0" y="108" text-anchor="middle">goal → ordered subgoals</text>
+<text class="ts" x="395.0" y="124" text-anchor="middle">(it never touches the page)</text>
+<line x1="500" y1="102" x2="540" y2="102" class="arr" marker-end="url(#a)"/>
+<rect x="540" y="70" width="190" height="64" rx="8" fill="#f0e9f7" stroke="#c3a8df"/>
+<text class="th" x="635.0" y="90" text-anchor="middle">Subgoals</text>
+<text class="ts" x="635.0" y="108" text-anchor="middle">each carries a</text>
+<text class="ts" x="635.0" y="124" text-anchor="middle">success-condition + risk tier</text>
+<rect x="14" y="184" width="732" height="372" rx="10" fill="none" stroke="#ccc" stroke-dasharray="4 4"/>
+<text class="it" x="28" y="204">PER SUBGOAL — the inner observe/decide/act loop</text>
+<line x1="635" y1="134" x2="635" y2="214" class="arr" marker-end="url(#a)"/>
+<text class="it" x="645" y="200" text-anchor="start">for each subgoal</text>
+<rect x="270" y="214" width="220" height="64" rx="8" fill="#fdecea" stroke="#eaa79c"/>
+<text class="th" x="380.0" y="234" text-anchor="middle">Reasoner · scout</text>
+<text class="ts" x="380.0" y="252" text-anchor="middle">sees a fresh page view,</text>
+<text class="ts" x="380.0" y="268" text-anchor="middle">picks ONE action</text>
+<rect x="40" y="222" width="200" height="48" rx="8" fill="#e6f4f1" stroke="#8fc7bb"/>
+<text class="th" x="140.0" y="247.2" text-anchor="middle">acts on the live page</text>
+<text class="ts" x="140.0" y="260.56" text-anchor="middle">click / type / navigate …</text>
+<path d="M270 246 L244 246" class="arr" marker-end="url(#a)"/>
+<path d="M150 270 L150 320 L268 300" class="arr" marker-end="url(#a)"/>
+<text class="it" x="60" y="300" text-anchor="start">fresh snapshot each turn</text>
+<line x1="380" y1="278" x2="380" y2="318" class="arr" marker-end="url(#a)"/>
+<text class="it" x="392" y="304" text-anchor="start">subgoal_complete</text>
+<rect x="280" y="320" width="200" height="60" rx="8" fill="#fdf3e3" stroke="#e8c98f"/>
+<text class="th" x="380.0" y="350.0" text-anchor="middle">Verifier</text>
+<text class="ts" x="380.0" y="367.2" text-anchor="middle">independent success check</text>
+<line x1="330" y1="380" x2="200" y2="430" class="arr" marker-end="url(#a)"/>
+<line x1="430" y1="380" x2="560" y2="430" class="arr" marker-end="url(#a)"/>
+<path d="M480 350 L600 350 L600 246 L492 246" class="arr" marker-end="url(#a)"/>
+<text class="it" x="610" y="300" text-anchor="start">rejected →</text>
+<text class="it" x="610" y="316" text-anchor="start">try again</text>
+<rect x="80" y="432" width="240" height="56" rx="8" fill="#e7f3ea" stroke="#9ccaa6"/>
+<text class="th" x="200.0" y="460.4" text-anchor="middle">satisfied → next subgoal</text>
+<text class="ts" x="200.0" y="476.32" text-anchor="middle">the doer is not trusted alone</text>
+<rect x="440" y="432" width="250" height="56" rx="8" fill="#fdecea" stroke="#eaa79c"/>
+<text class="th" x="565.0" y="460.4" text-anchor="middle">stuck / escalate → re-plan</text>
+<text class="ts" x="565.0" y="476.32" text-anchor="middle">hands back to the Planner</text>
+<path d="M690 432 L724 432 L724 60 L502 60" class="arrx" marker-end="url(#ax)"/>
+<text class="it" x="560" y="54" text-anchor="middle">Planner revises the remaining subgoals</text>
+<line x1="200" y1="488" x2="200" y2="600" class="arr" marker-end="url(#a)"/>
+<text class="it" x="212" y="560" text-anchor="start">all subgoals done →</text>
+<rect x="14" y="590" width="732" height="150" rx="10" fill="none" stroke="#ccc" stroke-dasharray="4 4"/>
+<text class="it" x="28" y="610">FINISH — rank, then write the answer</text>
+<rect x="120" y="620" width="240" height="64" rx="8" fill="#e7f3ea" stroke="#9ccaa6"/>
+<text class="th" x="240.0" y="640" text-anchor="middle">Scorer (pure code)</text>
+<text class="ts" x="240.0" y="658" text-anchor="middle">weighted ranking of options</text>
+<text class="ts" x="240.0" y="674" text-anchor="middle">explore→exploit, explainable</text>
+<line x1="360" y1="652" x2="400" y2="652" class="arr" marker-end="url(#a)"/>
+<rect x="400" y="620" width="240" height="64" rx="8" fill="#f0e9f7" stroke="#c3a8df"/>
+<text class="th" x="520.0" y="640" text-anchor="middle">Composer · gpt-oss-120b</text>
+<text class="ts" x="520.0" y="658" text-anchor="middle">writes the final shortlist</text>
+<text class="ts" x="520.0" y="674" text-anchor="middle">→ the answer you read</text>
+</svg>

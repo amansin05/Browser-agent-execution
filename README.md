@@ -19,6 +19,21 @@ is needing Node.js and writing our own MCP client so Scout stays the brain (`sco
 
 ## Architecture (Path B)
 
+**The whole system at a glance** — you type a task; the orchestrator runs plan → reason → verify
+→ re-plan on the Groq brain (split by role); the Playwright MCP server *perceives* and *actuates*
+your live Chrome; and local SQLite holds memory, session state, and a replayable per-run trace.
+Safety runs throughout: risky steps pause for your approval and a domain allowlist blocks
+off-limits sites.
+
+![Browser Agent — the whole system at a glance](docs/06-connected-overview.svg)
+
+The same stack seen as **five layers** — chat UI, orchestrator + brain, the hands (Playwright
+MCP), your browser, and memory:
+
+![Browser Agent — the 5-layer stack](docs/01-layer-map.svg)
+
+In text, the core request/response cycle is just:
+
 ```
 task ─► Scout (Groq, tool-calling) ─► picks one tool call
             ▲                              │
@@ -27,6 +42,13 @@ task ─► Scout (Groq, tool-calling) ─► picks one tool call
                               ▼
                    Playwright MCP Bridge extension ─► your live Chrome
 ```
+
+**Perception & actuation** — how the agent *sees* and *acts*: it perceives each page as an
+indexed DOM / accessibility tree (with the content extractor as a fallback for opaque pages),
+then actuates with `click` / `type` / `scroll` / `navigate` (plus synthetic control actions) over
+Playwright MCP.
+
+![The hands — how it sees (perceive) and acts (actuate)](docs/04-perception-actuation.svg)
 
 The code lives in an installable `browser_agent` package (`src/` layout).
 
@@ -65,7 +87,7 @@ src/browser_agent/
 test/                    pytest deterministic suite (fakes; no network)
 scripts/                 live runners + eval_set + hello_world + pages/ (html fixtures)
 dev-ui/                  React + TypeScript chat console
-docs/                    the execution plan
+docs/                    the execution plan + architecture diagrams (01–06 *.svg)
 pyproject.toml  makefile
 ```
 
@@ -107,7 +129,15 @@ tab so you see it.
 | `agent/flat.py` | **Flat loop** — Scout picks one MCP tool at a time until it answers. Simple baseline. | 1–2 |
 | `agent/main.py` | **Two-tier brain** — planner → per-subgoal reasoner → independent verifier → re-plan, with an approval gate + domain allowlist. | 3 + 5 |
 
-The two-tier agent realizes Appendix A of the plan on the Path B stack:
+Both agents share the same **heartbeat** — we hand the brain a fresh observation, it picks exactly
+one action, we execute it, and we repeat until the goal is met (no growing transcript):
+
+![The heartbeat — observe → decide → act](docs/02-agent-loop.svg)
+
+The two-tier agent realizes Appendix A of the plan on the Path B stack — **plan once, then reason
+→ verify → re-plan** per subgoal:
+
+![The two-tier brain — plan · reason · verify · re-plan](docs/03-two-tier-brain.svg)
 - **Web grounding** (`web_grounding`, `agent/grounding.py`) → BEFORE planning, a quick live web
   search of the goal runs in the same browser; the top result titles + domains are prepended to the
   planner preamble so it anchors on real, goal-appropriate sources (jeans → fashion retailers, not
@@ -138,6 +168,12 @@ The two-tier agent realizes Appendix A of the plan on the Path B stack:
 ```
 
 ## Sessions & memory
+
+How **memory, session state, and tab parking** fit together — within a session one browser serves
+many tasks, working tabs are parked (closed + remembered) and reopened on a follow-up, and
+everything persists to local SQLite:
+
+![Memory, state & tab parking](docs/05-memory-sessions.svg)
 
 A **session** = one persistent browser + one memory record. `AgentSession` opens the Playwright
 MCP browser **once** and runs many tasks against it. The browser is torn down **only when the
