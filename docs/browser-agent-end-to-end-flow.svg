@@ -1,0 +1,168 @@
+<svg width="680" height="1410" viewBox="0 0 680 1410" xmlns="http://www.w3.org/2000/svg" role="img">
+<title>Browser agent — complete flow from task to answer</title>
+<desc>Top-to-bottom flow: you type a task, it passes through the chat UI and WebSocket into the orchestrator; memory feeds the planner; the planner grounds the goal and produces subgoals; each subgoal runs an observe-decide-act loop against your live Chrome, gated by a verifier that either advances or escalates a re-plan; when all subgoals pass, a scorer ranks and a composer writes the final answer streamed back to you.</desc>
+<style>
+text{font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif}
+.th{font-size:14px;font-weight:500}
+.ts{font-size:12px;font-weight:400}
+.lbl{font-size:12px;fill:#5F5E5A}
+.band{fill:none;stroke:#B4B2A9;stroke-width:0.5;stroke-dasharray:4 4}
+.arr{stroke:#888780;stroke-width:1.5;fill:none}
+.box{stroke-width:0.5}
+.coral{stroke:#D85A30;stroke-width:1.5;fill:none}
+.f-gray{fill:#F1EFE8;stroke:#888780}
+.f-blue{fill:#E6F1FB;stroke:#185FA5}
+.f-purple{fill:#EEEDFE;stroke:#534AB7}
+.f-teal{fill:#E1F5EE;stroke:#0F6E56}
+.f-amber{fill:#FAEEDA;stroke:#854F0B}
+.f-green{fill:#EAF3DE;stroke:#3B6D11}
+.tt-gray{fill:#2C2C2A}.st-gray{fill:#5F5E5A}
+.tt-blue{fill:#0C447C}.st-blue{fill:#185FA5}
+.tt-purple{fill:#26215C}.st-purple{fill:#534AB7}
+.tt-teal{fill:#04342C}.st-teal{fill:#0F6E56}
+.tt-amber{fill:#412402}.st-amber{fill:#854F0B}
+.tt-green{fill:#173404}.st-green{fill:#3B6D11}
+@media (prefers-color-scheme: dark){
+.lbl{fill:#9c9a92}
+.arr{stroke:#9c9a92}
+.band{stroke:#5F5E5A}
+.coral{stroke:#F0997B}
+.f-gray{fill:#444441;stroke:#B4B2A9}
+.f-blue{fill:#0C447C;stroke:#85B7EB}
+.f-purple{fill:#3C3489;stroke:#AFA9EC}
+.f-teal{fill:#085041;stroke:#5DCAA5}
+.f-amber{fill:#633806;stroke:#FAC775}
+.f-green{fill:#27500A;stroke:#97C459}
+.tt-gray{fill:#F1EFE8}.st-gray{fill:#D3D1C7}
+.tt-blue{fill:#B5D4F4}.st-blue{fill:#85B7EB}
+.tt-purple{fill:#CECBF6}.st-purple{fill:#AFA9EC}
+.tt-teal{fill:#9FE1CB}.st-teal{fill:#5DCAA5}
+.tt-amber{fill:#FAC775}.st-amber{fill:#EF9F27}
+.tt-green{fill:#C0DD97}.st-green{fill:#97C459}
+}
+</style>
+<defs>
+<marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker>
+</defs>
+
+<rect class="box f-gray" x="260" y="40" width="160" height="56" rx="8"/>
+<text class="th tt-gray" x="340" y="62" text-anchor="middle" dominant-baseline="central">You</text>
+<text class="ts st-gray" x="340" y="80" text-anchor="middle" dominant-baseline="central">type a task</text>
+<line x1="340" y1="96" x2="340" y2="118" class="arr" marker-end="url(#arrow)"/>
+
+<rect class="band" x="40" y="122" width="600" height="92" rx="10"/>
+<text class="lbl" x="54" y="141" dominant-baseline="central">Interface — streams every step live</text>
+<rect class="box f-blue" x="80" y="150" width="240" height="52" rx="8"/>
+<text class="th tt-blue" x="200" y="170" text-anchor="middle" dominant-baseline="central">Chat UI</text>
+<text class="ts st-blue" x="200" y="188" text-anchor="middle" dominant-baseline="central">React console (dev-ui)</text>
+<rect class="box f-blue" x="360" y="150" width="240" height="52" rx="8"/>
+<text class="th tt-blue" x="480" y="170" text-anchor="middle" dominant-baseline="central">WebSocket transport</text>
+<text class="ts st-blue" x="480" y="188" text-anchor="middle" dominant-baseline="central">FastAPI · one session</text>
+<line x1="340" y1="214" x2="340" y2="236" class="arr" marker-end="url(#arrow)"/>
+
+<rect class="box f-purple" x="220" y="238" width="240" height="56" rx="8"/>
+<text class="th tt-purple" x="340" y="260" text-anchor="middle" dominant-baseline="central">Orchestrator</text>
+<text class="ts st-purple" x="340" y="278" text-anchor="middle" dominant-baseline="central">plan → reason → verify → re-plan</text>
+<line x1="340" y1="294" x2="340" y2="318" class="arr" marker-end="url(#arrow)"/>
+
+<rect class="band" x="40" y="322" width="600" height="128" rx="10"/>
+<text class="lbl" x="54" y="341" dominant-baseline="central">Memory &amp; state — feeds the planner each task</text>
+<rect class="box f-green" x="70" y="352" width="170" height="56" rx="8"/>
+<text class="th tt-green" x="155" y="374" text-anchor="middle" dominant-baseline="central">Session + notes</text>
+<text class="ts st-green" x="155" y="392" text-anchor="middle" dominant-baseline="central">candidates, scratchpad</text>
+<rect class="box f-green" x="255" y="352" width="170" height="56" rx="8"/>
+<text class="th tt-green" x="340" y="374" text-anchor="middle" dominant-baseline="central">Profile (SQLite)</text>
+<text class="ts st-green" x="340" y="392" text-anchor="middle" dominant-baseline="central">persona · prefs</text>
+<rect class="box f-green" x="440" y="352" width="170" height="56" rx="8"/>
+<text class="th tt-green" x="525" y="374" text-anchor="middle" dominant-baseline="central">Per-run trace</text>
+<text class="ts st-green" x="525" y="392" text-anchor="middle" dominant-baseline="central">replayable JSONL</text>
+<text class="lbl" x="70" y="432" dominant-baseline="central">Tabs parked on finish, reopened if the next task is a follow-up.</text>
+
+<line x1="340" y1="452" x2="340" y2="496" class="arr" marker-end="url(#arrow)"/>
+<text class="lbl" x="352" y="474" dominant-baseline="central">memory preamble</text>
+
+<rect class="band" x="40" y="500" width="600" height="110" rx="10"/>
+<text class="lbl" x="54" y="519" dominant-baseline="central">Plan — once per goal (re-run on escalate)</text>
+<rect class="box f-amber" x="60" y="530" width="170" height="64" rx="8"/>
+<text class="th tt-amber" x="145" y="554" text-anchor="middle" dominant-baseline="central">Web grounding</text>
+<text class="ts st-amber" x="145" y="572" text-anchor="middle" dominant-baseline="central">quick search of goal</text>
+<rect class="box f-purple" x="250" y="530" width="170" height="64" rx="8"/>
+<text class="th tt-purple" x="335" y="554" text-anchor="middle" dominant-baseline="central">Planner (qwen3)</text>
+<text class="ts st-purple" x="335" y="572" text-anchor="middle" dominant-baseline="central">ordered subgoals</text>
+<rect class="box f-purple" x="440" y="530" width="170" height="64" rx="8"/>
+<text class="th tt-purple" x="525" y="554" text-anchor="middle" dominant-baseline="central">Subgoals</text>
+<text class="ts st-purple" x="525" y="572" text-anchor="middle" dominant-baseline="central">success + risk tier</text>
+<line x1="230" y1="562" x2="250" y2="562" class="arr" marker-end="url(#arrow)"/>
+<line x1="420" y1="562" x2="440" y2="562" class="arr" marker-end="url(#arrow)"/>
+
+<line x1="340" y1="610" x2="340" y2="636" class="arr" marker-end="url(#arrow)"/>
+<text class="lbl" x="348" y="626" dominant-baseline="central">for each subgoal</text>
+
+<rect class="band" x="40" y="640" width="600" height="520" rx="10"/>
+<text class="lbl" x="54" y="659" dominant-baseline="central">Per subgoal — observe → decide → act</text>
+<rect class="box f-teal" x="250" y="674" width="180" height="56" rx="8"/>
+<text class="th tt-teal" x="340" y="696" text-anchor="middle" dominant-baseline="central">Perceive page</text>
+<text class="ts st-teal" x="340" y="714" text-anchor="middle" dominant-baseline="central">DOM · a11y · extractor</text>
+<line x1="340" y1="730" x2="340" y2="750" class="arr" marker-end="url(#arrow)"/>
+<rect class="box f-purple" x="250" y="752" width="180" height="56" rx="8"/>
+<text class="th tt-purple" x="340" y="774" text-anchor="middle" dominant-baseline="central">Reasoner · scout</text>
+<text class="ts st-purple" x="340" y="792" text-anchor="middle" dominant-baseline="central">picks ONE action</text>
+<line x1="340" y1="808" x2="340" y2="828" class="arr" marker-end="url(#arrow)"/>
+<rect class="box f-teal" x="250" y="830" width="180" height="56" rx="8"/>
+<text class="th tt-teal" x="340" y="852" text-anchor="middle" dominant-baseline="central">Playwright MCP</text>
+<text class="ts st-teal" x="340" y="870" text-anchor="middle" dominant-baseline="central">performs the action</text>
+<line x1="340" y1="886" x2="340" y2="906" class="arr" marker-end="url(#arrow)"/>
+<rect class="box f-blue" x="250" y="908" width="180" height="56" rx="8"/>
+<text class="th tt-blue" x="340" y="930" text-anchor="middle" dominant-baseline="central">Your live Chrome</text>
+<text class="ts st-blue" x="340" y="948" text-anchor="middle" dominant-baseline="central">real tab · Bridge</text>
+<path d="M250 936 L96 936 L96 702 L246 702" class="arr" marker-end="url(#arrow)"/>
+<text class="lbl" x="104" y="722" dominant-baseline="central">observe again</text>
+<text class="lbl" x="104" y="738" dominant-baseline="central">fresh view each turn</text>
+<line x1="340" y1="964" x2="340" y2="982" class="arr" marker-end="url(#arrow)"/>
+<text class="lbl" x="348" y="976" dominant-baseline="central">subgoal_complete</text>
+<rect class="box f-amber" x="250" y="984" width="180" height="56" rx="8"/>
+<text class="th tt-amber" x="340" y="1006" text-anchor="middle" dominant-baseline="central">Verifier</text>
+<text class="ts st-amber" x="340" y="1024" text-anchor="middle" dominant-baseline="central">independent check</text>
+<path d="M300 1040 L185 1072" class="arr" marker-end="url(#arrow)"/>
+<path d="M390 1040 L480 1072" class="arr" marker-end="url(#arrow)"/>
+<rect class="box f-amber" x="70" y="1074" width="230" height="48" rx="8"/>
+<text class="th tt-amber" x="185" y="1092" text-anchor="middle" dominant-baseline="central">Satisfied → next subgoal</text>
+<text class="ts st-amber" x="185" y="1110" text-anchor="middle" dominant-baseline="central">loop continues</text>
+<rect class="box f-amber" x="380" y="1074" width="230" height="48" rx="8"/>
+<text class="th tt-amber" x="495" y="1092" text-anchor="middle" dominant-baseline="central">Stuck → escalate</text>
+<text class="ts st-amber" x="495" y="1110" text-anchor="middle" dominant-baseline="central">hands back to planner</text>
+
+<path d="M610 1098 L634 1098 L634 488 L525 488 L525 530" class="coral" marker-end="url(#arrow)"/>
+<text class="lbl" x="525" y="476" text-anchor="middle" dominant-baseline="central">re-plan → revise subgoals</text>
+
+<path d="M185 1122 L185 1207 L200 1207 L200 1210" class="arr" marker-end="url(#arrow)"/>
+<text class="lbl" x="120" y="1150" dominant-baseline="central">all subgoals done</text>
+
+<rect class="band" x="40" y="1182" width="600" height="98" rx="10"/>
+<text class="lbl" x="54" y="1201" dominant-baseline="central">Finish — rank, then write the answer</text>
+<rect class="box f-amber" x="80" y="1212" width="240" height="52" rx="8"/>
+<text class="th tt-amber" x="200" y="1232" text-anchor="middle" dominant-baseline="central">Scorer (pure code)</text>
+<text class="ts st-amber" x="200" y="1250" text-anchor="middle" dominant-baseline="central">weighted ranking</text>
+<rect class="box f-purple" x="360" y="1212" width="240" height="52" rx="8"/>
+<text class="th tt-purple" x="480" y="1232" text-anchor="middle" dominant-baseline="central">Composer · gpt-oss</text>
+<text class="ts st-purple" x="480" y="1250" text-anchor="middle" dominant-baseline="central">writes final answer</text>
+<line x1="320" y1="1238" x2="360" y2="1238" class="arr" marker-end="url(#arrow)"/>
+
+<line x1="480" y1="1264" x2="480" y2="1310" class="arr" marker-end="url(#arrow)"/>
+<rect class="box f-gray" x="360" y="1312" width="240" height="52" rx="8"/>
+<text class="th tt-gray" x="480" y="1332" text-anchor="middle" dominant-baseline="central">Final answer</text>
+<text class="ts st-gray" x="480" y="1350" text-anchor="middle" dominant-baseline="central">streams back to you</text>
+
+<rect class="box f-gray" x="50" y="1376" width="12" height="12" rx="3"/>
+<text class="lbl" x="68" y="1383" dominant-baseline="central">structure</text>
+<rect class="box f-blue" x="150" y="1376" width="12" height="12" rx="3"/>
+<text class="lbl" x="168" y="1383" dominant-baseline="central">interface</text>
+<rect class="box f-purple" x="250" y="1376" width="12" height="12" rx="3"/>
+<text class="lbl" x="268" y="1383" dominant-baseline="central">brain</text>
+<rect class="box f-teal" x="350" y="1376" width="12" height="12" rx="3"/>
+<text class="lbl" x="368" y="1383" dominant-baseline="central">hands</text>
+<rect class="box f-amber" x="450" y="1376" width="12" height="12" rx="3"/>
+<text class="lbl" x="468" y="1383" dominant-baseline="central">checks</text>
+<rect class="box f-green" x="550" y="1376" width="12" height="12" rx="3"/>
+<text class="lbl" x="568" y="1383" dominant-baseline="central">memory</text>
+</svg>

@@ -25,7 +25,7 @@ your live Chrome; and local SQLite holds memory, session state, and a replayable
 Safety runs throughout: risky steps pause for your approval and a domain allowlist blocks
 off-limits sites.
 
-![Browser Agent — the whole system at a glance](docs/06-connected-overview.svg)
+![Browser Agent — the whole system at a glance](docs/browser-agent-end-to-end-flow.svg)
 
 The same stack seen as **five layers** — chat UI, orchestrator + brain, the hands (Playwright
 MCP), your browser, and memory:
