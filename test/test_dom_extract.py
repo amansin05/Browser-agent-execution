@@ -191,3 +191,13 @@ async def test_checkout_helpers_never_raise():
     assert (await dom_extract.proceed_to_checkout(FakeSession([RuntimeError("x")]))).get("ok") is False
     assert (await dom_extract.at_checkout(FakeSession([RuntimeError("x")])))[0] is False
     assert (await dom_extract.select_cod(FakeSession([RuntimeError("x")]))).get("ok") is False
+
+
+def test_is_checkout_url():
+    assert dom_extract.is_checkout_url("https://www.amazon.in/checkout/p/p-404-6178406/pay?referrer=pay")
+    assert dom_extract.is_checkout_url("https://www.amazon.in/gp/buy/spc/handlers/display.html")
+    assert dom_extract.is_checkout_url("https://shop.com/payment/select")
+    assert not dom_extract.is_checkout_url("https://www.amazon.in/s?k=think+and+grow+rich")  # search
+    assert not dom_extract.is_checkout_url("https://www.amazon.in/gp/cart/view.html")          # cart
+    assert not dom_extract.is_checkout_url("https://www.amazon.in/dp/1585424331")              # product
+    assert not dom_extract.is_checkout_url("")

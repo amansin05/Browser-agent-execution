@@ -26,6 +26,7 @@ from browser_agent.services.groq_service import make_groq_client
 from browser_agent.services.mcp_client import (
     open_session, parse_tabs, tool_result_to_text, wait_for_real_tab,
 )
+from browser_agent.agent.dom_extract import is_checkout_url
 from browser_agent.utils.domains import is_search_engine
 from browser_agent.utils.io import cli_approve, cli_ask, maybe_await
 from browser_agent.utils.text import extract_json
@@ -71,6 +72,9 @@ class AgentSession:
         self._parked_tabs: list[str] = []
         # The previous task's text — used only to classify whether the next task is a follow-up.
         self._last_task: str | None = None
+        # Checkout/payment tabs left OPEN at the end of the last task (a buy flow stops there for the
+        # user to place the order). Never parked/closed; the user finishes the purchase on them.
+        self._open_checkout_tabs: list[str] = []
 
     async def open(self) -> "AgentSession":
         """Launch (or attach to) the browser once and cache the tool schemas."""
@@ -128,8 +132,12 @@ class AgentSession:
         keep = self._find_chat_tab(tabs)
         keep_idx = keep[0] if keep else None
         origin_idx = self._origin_tab[0] if self._origin_tab else None
+        # A leftover checkout/payment tab (a prior buy's handoff) is the USER's, not a working tab —
+        # don't reuse it, or the next task would navigate away from a pending purchase. Open a fresh
+        # tab instead.
         has_working = any(
             idx not in (keep_idx, origin_idx) and not _same_page(url, self.focus_url)
+            and not is_checkout_url(url)
             for idx, _is_cur, url in tabs)
         if has_working:
             return  # the agent already has a tab to work in (fresh or restored)
@@ -277,6 +285,12 @@ class AgentSession:
                 parked = await self._park_working_tabs()
                 if parked:
                     emit({"type": "tabs_parked", "urls": parked})
+                # A buy flow stops at the payment page for the user to place the order — that tab was
+                # LEFT OPEN by parking. Surface it and focus it so the user lands on the page to finish
+                # (don't strand them on the chat tab with a closed checkout).
+                if self._open_checkout_tabs:
+                    emit({"type": "checkout_handoff", "urls": list(self._open_checkout_tabs)})
+                    await self._focus_url_tab(self._open_checkout_tabs[0])
             except Exception as e:
                 log.warning("tab parking failed (%r); leaving working tabs open", e)
             if recorder:
@@ -336,12 +350,17 @@ class AgentSession:
         there was nothing to park). Closes highest index first so the lower indices we still hold
         don't shift mid-loop. The chat/origin tab is left untouched, so focus falls back to it."""
         tabs = await self._working_tabs()
+        # NEVER close a checkout / payment tab: a buy flow intentionally stops there for the USER to
+        # place the order. Closing it throws the handoff away (the "it closed the tab instead of
+        # letting me buy" bug). Such tabs are left OPEN (and focused by run_task) and not parked.
+        self._open_checkout_tabs = [url for _idx, url in tabs if is_checkout_url(url)]
+        tabs = [(idx, url) for idx, url in tabs if not is_checkout_url(url)]
         if not tabs:
             self._parked_tabs = []
             return []
-        # Close every working tab, but only REMEMBER the real ones. A leftover search-engine (SERP)
-        # tab must not be reopened on a follow-up — resuming on a Google results page is what made the
-        # next task scrape the SERP as fake "products" (the SERP-scrape bug). Closed, just not parked.
+        # Close every (remaining) working tab, but only REMEMBER the real ones. A leftover
+        # search-engine (SERP) tab must not be reopened on a follow-up — resuming on a Google results
+        # page is what made the next task scrape the SERP as fake "products". Closed, just not parked.
         self._parked_tabs = [url for _, url in tabs if not is_search_engine(url)]
         if self.memory:
             self.memory.note("parked tabs (reopened on a follow-up): "
@@ -458,6 +477,21 @@ class AgentSession:
         except Exception:
             return None
         return working
+
+    async def _focus_url_tab(self, url) -> None:
+        """Switch the live browser to the tab on `url` (best-effort, extension mode). Used to leave the
+        user ON the checkout/payment page after a buy handoff so they can place the order, instead of
+        stranding them on the chat tab. Matches by URL so an index shift after parking is handled."""
+        if not (self.use_extension and self.session and url):
+            return
+        try:
+            tabs = await self._list_tabs()
+            target = next((i for i, _is_cur, u in tabs if _same_page(u, url)), None)
+            if target is not None:
+                await self.session.call_tool("browser_tabs", {"action": "select", "index": target})
+                log.info("checkout handoff: focused the payment tab #%s for the user to place the order", target)
+        except Exception as e:
+            log.warning("could not focus the checkout/payment tab (%r)", e)
 
     async def _restore_tab(self, working) -> None:
         """Switch focus back to the agent's working tab after a human pause. Matches by URL first

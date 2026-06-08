@@ -257,6 +257,22 @@ async def test_park_closes_but_does_not_remember_search_engine_tab():
     assert [t["url"] for t in fake.tabs] == ["http://localhost:5173/"]  # but it WAS closed
 
 
+async def test_park_leaves_checkout_tab_open_for_user():
+    # A buy flow stops at the payment page for the user to place the order. That tab must be LEFT
+    # OPEN — never parked/closed (the "it closed the tab instead of letting me buy" bug).
+    ckurl = "https://www.amazon.in/checkout/p/p-404-6178406/pay?pipelineType=Chewbacca&referrer=pay"
+    fake = FakeTabSession([("http://localhost:5173/", True),
+                           (ckurl, False),
+                           ("http://shop.com/a", False)])
+    s = _tab_session(fake, focus_url="http://localhost:5173/", use_extension=True)
+    parked = await s._park_working_tabs()
+    assert parked == ["http://shop.com/a"]                 # the ordinary working tab is parked/closed
+    assert s._open_checkout_tabs == [ckurl]                # the payment tab is tracked as a handoff
+    urls = [t["url"] for t in fake.tabs]
+    assert ckurl in urls                                   # and LEFT OPEN for the user
+    assert "http://shop.com/a" not in urls                 # while the other working tab was closed
+
+
 async def test_restore_reopens_parked_tabs_and_clears():
     fake = FakeTabSession([("http://example.com/page", True)])
     s = _tab_session(fake, origin_tab=(0, "http://example.com/page"))

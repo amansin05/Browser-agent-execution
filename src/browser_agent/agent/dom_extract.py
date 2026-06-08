@@ -23,11 +23,26 @@ returns [] and the caller falls back to the LLM a11y extractor. Never raises.
 
 import asyncio
 import json
+import re
 
 from browser_agent.agent.reader import evaluate_json
 from browser_agent.log import get_logger
 
 log = get_logger(__name__)
+
+# A checkout / payment / order-review URL (pure, no DOM). Mirrors the URL arm of _AT_CHECKOUT_JS so
+# tab-parking can recognize a payment page WITHOUT a live probe — the buy flow stops there for the
+# user to place the order, so that tab must be LEFT OPEN, never closed (the "it closed the tab
+# instead of letting me buy" bug).
+_CHECKOUT_URL_RE = re.compile(
+    r"/gp/buy/|/checkout/|/spc/|/payments?\b|buy/spc|go-to-checkout|alm.*checkout|proceedtocheckout",
+    re.I)
+
+
+def is_checkout_url(url: str) -> bool:
+    """True if `url` is a checkout / payment / order-review page (not the cart). Used so a buy flow's
+    handoff tab is preserved for the user to place the order."""
+    return bool(url) and bool(_CHECKOUT_URL_RE.search(url))
 
 MAX_CANDIDATES = 40       # cap rows per extraction (a page rarely needs more to choose from)
 _SCROLL_SETTLE_S = 0.6    # let a lazy grid load after a scroll before re-extracting
