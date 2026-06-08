@@ -756,6 +756,37 @@ async def test_add_to_cart_button_absent_falls_through_to_reasoner(monkeypatch):
     assert any("Do NOT navigate" in r for r in reasons)
 
 
+async def test_add_to_cart_only_clicks_on_selected_product_page(monkeypatch):
+    # Off the selected product (cart/search page) a generic 'Add to cart' button is a RECOMMENDED
+    # item (e.g. Rich Dad Poor Dad). We must NOT click it there — only once the page IS the selected
+    # product. Here verify_product_match is False on the first look, True after the reasoner navigates.
+    calls = {"match": 0, "click": 0}
+
+    def fake_match(url, title, sel):
+        calls["match"] += 1
+        return (calls["match"] >= 2, "on it" if calls["match"] >= 2 else "not the selected product")
+
+    async def fake_click(session):
+        calls["click"] += 1
+        return {"ok": True, "text": "Add to cart"}
+
+    async def fake_cc(session, item_title=None):
+        return (True, "cart badge 1")
+
+    monkeypatch.setattr(orch, "verify_product_match", fake_match)
+    monkeypatch.setattr(orch, "click_add_to_cart", fake_click)
+    monkeypatch.setattr(orch, "cart_confirmed", fake_cc)
+    monkeypatch.setattr(orch.asyncio, "sleep", _noop_sleep)
+    selected = {"name": "Think and Grow Rich", "url": "https://www.amazon.in/dp/1585424331"}
+    sg = {"goal": "Add the selected book to cart", "success_condition": "in cart", "type": "act"}
+    acts = [reasoner_resp("navigate", '{"url": "https://www.amazon.in/dp/1585424331"}')]
+    status, _ = await run_subgoal(FakeGroq(acts), FakeSession(dom=_dom_payload()), [], sg, allowlist=set(),
+                                  approve=lambda p: True, ask=lambda q: "", observations=[], max_steps=5,
+                                  read_content=False, selected=selected)
+    assert status == "complete"
+    assert calls["click"] == 1          # clicked exactly once — only after we were ON the selected product
+
+
 async def test_checkout_reaches_payment_page_and_completes(monkeypatch):
     # Deterministic checkout: on the cart page we click "Proceed to checkout"; once the payment page is
     # reached the subgoal COMPLETES (the human's secured step) — the reasoner never drives the payment

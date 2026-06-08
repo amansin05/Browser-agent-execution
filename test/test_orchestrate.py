@@ -372,6 +372,32 @@ async def test_checkout_gated_when_cart_empty(monkeypatch):
     assert plans["n"] >= 2 and result.startswith("Failed")   # gated -> re-plan -> exhausted
 
 
+async def test_orchestrate_skips_readd_when_already_in_cart(monkeypatch):
+    # After an add-to-cart succeeds, a re-plan that re-emits 'add to cart' must be SKIPPED when the
+    # cart is non-empty — otherwise it adds a 2nd copy / a recommended item (the cart-badge-2 bug).
+    runs = {"n": 0}
+
+    def atc(i):
+        return {"id": i, "type": "act", "goal": "Add the selected book to cart",
+                "success_condition": "cart+1", "tier": "auto", "needs_approval": False}
+
+    async def fake_plan(*a, **k):
+        return [atc(1), atc(2)]                      # the 2nd simulates a re-plan re-emitting add-to-cart
+
+    async def fake_run(*a, **k):
+        runs["n"] += 1
+        return ("complete", "added")
+
+    async def fake_cart(session):
+        return 1                                     # the item is already in the cart
+
+    monkeypatch.setattr(orch, "plan_subgoals", fake_plan)
+    monkeypatch.setattr(orch, "run_subgoal", fake_run)
+    monkeypatch.setattr(orch, "cart_count", fake_cart)
+    await _orchestrate()
+    assert runs["n"] == 1                            # only the first add-to-cart ran; the 2nd was skipped
+
+
 async def test_checkout_proceeds_when_cart_confirmed(monkeypatch):
     ran = {"run": 0}
 

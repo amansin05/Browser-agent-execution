@@ -314,6 +314,7 @@ async def run_subgoal(groq, session, reasoner_tools, subgoal, *, allowlist, appr
     sel_title = ((selected or {}).get("name") or (selected or {}).get("title")) if isinstance(selected, dict) else None
     atc_clicked = False         # add-to-cart: clicked the button deterministically (fix 2)?
     atc_confirm_polls = 0       # how many re-perceives we've waited for the cart to confirm
+    atc_offpage_nudged = False  # nudged the reasoner once that we're not on the selected product yet?
     variant_done = False        # add-to-cart: already selected a required size/variant (no re-select)?
     # A size stated in the goal/clarifications steers variant selection; else first in-stock is picked.
     preferred_size = _size_hint(f"{subgoal.get('goal', '')} {plan_context}")
@@ -480,15 +481,32 @@ async def run_subgoal(groq, session, reasoner_tools, subgoal, *, allowlist, appr
                                         "may have failed (sign-in / out of stock); do not retry blindly")
                 await asyncio.sleep(0.8)            # let the AJAX / smart-wagon interstitial render
                 continue
-            res = await click_add_to_cart(session)
-            if res.get("ok"):
-                atc_clicked = True
-                recent_actions.append(f"clicked Add to Cart (deterministic) -> {res.get('text', 'ok')}")
-                emit({"type": "action_result", "action": "add_to_cart", "ok": True,
-                      "outcome": res.get("text", "ok")})
-                await asyncio.sleep(0.8)
-                continue                            # re-perceive: the page may go to the confirmation
-            # button not on this page yet -> fall through; the reasoner navigates to the product page.
+            # ADD ONLY FROM THE SELECTED PRODUCT'S OWN PAGE. On the cart or search-results page a
+            # generic "Add to cart" button belongs to a RECOMMENDED item (e.g. "Rich Dad Poor Dad"
+            # shown next to "Think and Grow Rich") — clicking it adds the WRONG book. If we know the
+            # selected product, require its identity before the click; otherwise let the reasoner
+            # navigate to it first (the selected-product note drives that).
+            on_selected = True
+            if isinstance(selected, dict) and (selected.get("url") or selected.get("asin")):
+                on_selected, _id_reason = verify_product_match(url, page_title, selected)
+            if not on_selected:
+                if not atc_offpage_nudged:
+                    atc_offpage_nudged = True
+                    recent_actions.append(
+                        "ADD-TO-CART: you are NOT on the selected product's page yet. Navigate to the "
+                        "selected product URL FIRST — do NOT click an 'Add to cart' here (it would add a "
+                        "recommended/related item, not the one chosen).")
+                # fall through to the reasoner so it navigates to the selected product page
+            else:
+                res = await click_add_to_cart(session)
+                if res.get("ok"):
+                    atc_clicked = True
+                    recent_actions.append(f"clicked Add to Cart (deterministic) -> {res.get('text', 'ok')}")
+                    emit({"type": "action_result", "action": "add_to_cart", "ok": True,
+                          "outcome": res.get("text", "ok")})
+                    await asyncio.sleep(0.8)
+                    continue                        # re-perceive: the page may go to the confirmation
+                # button not on this page yet -> fall through; the reasoner navigates to the product page.
 
         # SIGN-IN WALL (fix 4): if we hit an auth page that ISN'T a planned login step, hand off to
         # the human (ask_human routes to the in-page overlay / chat in extension mode) — never let the
@@ -778,7 +796,8 @@ async def orchestrate(groq, session, reasoner_tools, capabilities, goal, *, allo
     _log_plan("plan", plan)
     emit({"type": "plan", "subgoals": plan})
 
-    state: dict = {"candidates": [], "selected": None, "answers": [], "failed_sources": []}
+    state: dict = {"candidates": [], "selected": None, "answers": [], "failed_sources": [],
+                   "added_to_cart": False}
     replans = 0
     clarifications = 0
     i = 0
@@ -908,6 +927,20 @@ async def orchestrate(groq, session, reasoner_tools, capabilities, goal, *, allo
                         # (or, at the cart/checkout stage, a "don't go back to the product" note)
                         + (_selected_note(state.get("selected"), sg) if sg_type != "explore" else ""))
 
+        # --- RE-ADD GUARD: once the chosen item is in the cart, a re-plan that re-emits "add to cart"
+        #     must NOT add it again — that puts a 2nd copy (or, off the product page, a RECOMMENDED
+        #     item like "Rich Dad Poor Dad") in the cart. If we already added and the cart is non-empty,
+        #     skip straight past this subgoal. ---
+        if _is_add_to_cart(sg) and state.get("added_to_cart"):
+            count = await cart_count(session)
+            if isinstance(count, int) and count > 0:
+                detail = f"already added to cart (count={count}) — not adding again"
+                log.info("subgoal %s add-to-cart skipped: %s", sg["id"], detail)
+                emit({"type": "subgoal_end", "id": sg["id"], "status": "complete", "detail": detail})
+                observations.append(detail)
+                i += 1
+                continue
+
         # --- CART-CONFIRMATION GATE (fix 3): never run a checkout/payment subgoal until the item is
         #     actually in the cart. The agent used to click an unstable "Proceed" index and navigate
         #     straight to /checkout on an empty/unrecognized cart -> sign-in wall -> loop. If the cart
@@ -1022,6 +1055,10 @@ async def orchestrate(groq, session, reasoner_tools, capabilities, goal, *, allo
         emit({"type": "subgoal_end", "id": sg["id"], "status": status, "detail": detail})
 
         if status == "complete":
+            # Remember a successful add-to-cart so a later re-plan doesn't add the item a SECOND time
+            # (the re-add guard above reads this).
+            if _is_add_to_cart(sg):
+                state["added_to_cart"] = True
             i += 1
             continue
         if status == "denied":
