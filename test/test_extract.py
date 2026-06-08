@@ -104,3 +104,45 @@ async def test_select_candidates_filters_before_ranking():
     groq = FakeGroq([content_resp("not json"), content_resp("nope"), content_resp("nada")])
     sel = await select_candidates(groq, "buy Think and Grow Rich", cands)
     assert sel["selected"]["name"] == "Think and Grow Rich"
+
+
+# ----------------------------------------------------------------- budget ceiling (price filter)
+def test_price_ceiling_parsing():
+    from browser_agent.agent.extract import _price_ceiling
+    assert _price_ceiling("asics shoes under 6000") == 6000
+    assert _price_ceiling("running shoes under ₹5,999") == 5999
+    assert _price_ceiling("a phone below Rs.20000") == 20000
+    assert _price_ceiling("headphones less than 3000") == 3000
+    assert _price_ceiling("jacket within 4500") == 4500
+    assert _price_ceiling("laptop upto 50000") == 50000
+    assert _price_ceiling("budget of 1500") == 1500
+    assert _price_ceiling("max 800") == 800
+    assert _price_ceiling("just buy me asics shoes") is None      # no ceiling stated
+
+
+def test_relevance_filter_drops_over_budget():
+    cands = [
+        {"name": "Asics Gel running shoe", "price": "₹5,499", "rating": 4.4},
+        {"name": "Asics Hypersync running shoe", "price": "₹9,999", "rating": 4.6},   # over budget
+        {"name": "Asics Kayano running shoe", "price": "₹6,000", "rating": 4.5},       # exactly at ceiling -> kept
+    ]
+    out = relevance_filter("asics running shoes under 6000", cands)
+    names = [c["name"] for c in out]
+    assert any("Gel" in n for n in names)                 # within budget kept
+    assert any("Kayano" in n for n in names)              # price == ceiling kept (<=)
+    assert not any("Hypersync" in n for n in names)       # over ₹6000 dropped
+
+
+def test_relevance_filter_keeps_unpriced_when_no_priced_options():
+    # When NO candidate has a price, the priced-filter keeps them all; the budget filter then keeps
+    # unpriced rows (price unknown != over budget) rather than zeroing the pool.
+    cands = [{"name": "Asics shoe one", "rating": 4.4}, {"name": "Asics shoe two", "rating": 4.6}]
+    out = relevance_filter("asics shoes under 6000", cands)
+    assert len(out) == 2
+
+
+def test_relevance_filter_budget_never_zeros_out():
+    # Every candidate is over budget -> don't return [] (better an over-budget shortlist than nothing).
+    cands = [{"name": "Asics A", "price": "₹9,999"}, {"name": "Asics B", "price": "₹12,999"}]
+    out = relevance_filter("asics shoes under 6000", cands)
+    assert len(out) == 2

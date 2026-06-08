@@ -288,7 +288,10 @@ async def main() -> int:
     async def run_one(i, name, subgoal, snapshot, expect):
         async with sem:
             try:
-                _, action, args = await reasoner_decide(groq, REASONER_TOOLS, subgoal, snapshot, [])
+                # reasoner_decide returns (thought, actions) where actions = [(name, args), ...];
+                # the eval scores the FIRST action's category (updated for the multi-action refactor).
+                _thought, actions = await reasoner_decide(groq, REASONER_TOOLS, subgoal, snapshot, [])
+                action, args = actions[0]
                 cat = categorize(action)
                 return {"i": i, "name": name, "ok": cat in expect, "action": action,
                         "cat": cat, "expect": sorted(expect), "args": args}

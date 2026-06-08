@@ -7,10 +7,12 @@ tabs.
 
 import asyncio
 import json
+import re
 from collections import deque
 
 from browser_agent.agent.dom_extract import (
-    cart_confirmed, cart_count, click_add_to_cart, extract_candidates_dom, extract_with_scroll,
+    at_checkout, cart_confirmed, cart_count, click_add_to_cart, current_url, extract_candidates_dom,
+    extract_with_scroll, proceed_to_checkout, select_cod, select_required_variant,
 )
 from browser_agent.agent.dom_index import execute_action, index_dom, is_terminating
 from browser_agent.agent.extract import extract_candidates, select_candidates, synthesize_options
@@ -25,7 +27,7 @@ from browser_agent.log import get_logger, trace_enabled
 from browser_agent.services.mcp_client import (
     full_snapshot, list_tabs_state, newest_new_tab, observe, open_session, resolve_url, select_tab,
 )
-from browser_agent.utils.domains import domain_allowed, domain_of
+from browser_agent.utils.domains import domain_allowed, domain_of, is_search_engine
 from browser_agent.utils.io import maybe_await
 from browser_agent.utils.text import page_looks_blocked, page_looks_like_login, snapshot_is_sufficient
 
@@ -152,6 +154,18 @@ def _selected_note(selected, sg=None) -> str:
             f"the product or open the cart page.")
 
 
+# A size stated in the goal/clarifications — "size 9", "uk 8", "us 10", "eu 42", "size: M". Requires a
+# size keyword so a stray digit (an ASIN, a price) isn't mistaken for a size. Used to pick the right
+# variant before add-to-cart; falls back to the first in-stock size when absent.
+_SIZE_RE = re.compile(
+    r"\b(?:size|uk|us|eu|eur)\s*[:=]?\s*((?:xxs|xs|s|m|l|xl|xxl|xxxl)|\d{1,2}(?:\.\d)?)\b", re.I)
+
+
+def _size_hint(text: str) -> str | None:
+    m = _SIZE_RE.search(text or "")
+    return m.group(1) if m else None
+
+
 def _norm_url(u: str) -> str:
     """Normalize a URL for revisit/loop comparison: drop the query + fragment, lowercase, no trailing
     slash. So `/s?k=x&qid=1` and `/s?k=x&qid=2` (the index-varying search bounce) compare equal."""
@@ -168,6 +182,20 @@ def _finalize_candidates(cands: list, base: str = "") -> list:
         if isinstance(c, dict):
             c["url"] = resolve_url(c.get("url") or "", base)
     return cands
+
+
+def _drop_junk_candidates(cands: list) -> list:
+    """Drop candidates that came off a SEARCH ENGINE — a SERP result block scrapes into a snippet
+    "candidate" (junk title, a number lifted from the snippet, a google.com/bing link) that is never
+    a buyable product (the SERP-scrape bug). Keyed on the per-row url/source; the page-level guard in
+    the explore salvage handles a11y rows that carry neither. Real-retailer rows (incl. url-less ones,
+    kept for research) pass through unchanged."""
+    out = [c for c in cands if isinstance(c, dict)
+           and not is_search_engine(c.get("url") or "") and not is_search_engine(c.get("source") or "")]
+    if len(out) != len(cands):
+        log.info("dropped %d search-engine (SERP) candidate(s) — not buyable products",
+                 len(cands) - len(out))
+    return out
 
 
 def _expand_explore_sources(sg: dict) -> list[dict]:
@@ -286,6 +314,14 @@ async def run_subgoal(groq, session, reasoner_tools, subgoal, *, allowlist, appr
     sel_title = ((selected or {}).get("name") or (selected or {}).get("title")) if isinstance(selected, dict) else None
     atc_clicked = False         # add-to-cart: clicked the button deterministically (fix 2)?
     atc_confirm_polls = 0       # how many re-perceives we've waited for the cart to confirm
+    variant_done = False        # add-to-cart: already selected a required size/variant (no re-select)?
+    # A size stated in the goal/clarifications steers variant selection; else first in-stock is picked.
+    preferred_size = _size_hint(f"{subgoal.get('goal', '')} {plan_context}")
+    is_checkout = _is_checkout(subgoal)   # a checkout/payment subgoal -> deterministic proceed + stop
+    ckout_polls = 0             # how many re-perceives we've waited to land on the checkout page
+    cod_tried = False           # already attempted the best-effort COD pre-selection?
+    cod_wanted = any(p in f"{subgoal.get('goal', '')} {subgoal.get('success_condition', '')} {plan_context}".lower()
+                     for p in ("cash on delivery", "cod", "cash-on-delivery"))
     listing_ready = False       # explore: a product grid is on the page -> restrict tools, complete
     listing_announced = False   # so we tell the reasoner "listing is ready" only once
 
@@ -360,6 +396,47 @@ async def run_subgoal(groq, session, reasoner_tools, subgoal, *, allowlist, appr
         if url:
             visited_urls.append(_norm_url(url))
 
+        # DETERMINISTIC CHECKOUT: on a checkout/payment subgoal, click "Proceed to checkout" and STOP
+        # the instant we reach the payment / order-review page — that page is the user's SECURED step
+        # (they place the order). The reasoner must NOT drive the payment pipeline (the COD-selection
+        # loop: it clicked payment radios + "Use this method" over and over until the budget ran out).
+        # We never click an order-COMMIT control; if the user asked for COD we pre-select it best-effort.
+        if is_checkout:
+            reached, signal = await at_checkout(session)
+            if reached:
+                if cod_wanted and not cod_tried:
+                    cod_tried = True
+                    cod = await select_cod(session)
+                    recent_actions.append(f"COD pre-select -> {'ok' if cod.get('ok') else cod.get('reason', 'not found')}")
+                    emit({"type": "cod_select", "ok": bool(cod.get("ok")), "detail": cod.get("reason", "")})
+                    await asyncio.sleep(0.4)
+                detail = ("reached the checkout/payment page — ready for you to "
+                          + ("confirm Cash on Delivery and place the order"
+                             if cod_wanted else "select payment and place the order")
+                          + f" ({signal})")
+                emit({"type": "verifier", "satisfied": True, "reason": detail,
+                      "condition": subgoal.get("success_condition", "")})
+                return "complete", detail
+            res = await proceed_to_checkout(session)
+            if res.get("ok"):
+                recent_actions.append(f"clicked Proceed to checkout (deterministic) -> {res.get('text', 'ok')}")
+                emit({"type": "action_result", "action": "proceed_to_checkout", "ok": True,
+                      "outcome": res.get("text", "ok")})
+                await asyncio.sleep(0.8)
+                continue                            # re-perceive: the checkout page should load
+            ckout_polls += 1
+            if ckout_polls >= 6:
+                return "escalate", ("could not reach the checkout page — no 'Proceed to checkout' "
+                                    "control found (the cart may be empty or a sign-in is required)")
+            if ckout_polls == 1:
+                # Steer the reasoner to the cart instead of fiddling with the payment pipeline — once a
+                # cart page is shown WE click Proceed to checkout deterministically.
+                recent_actions.append(
+                    "CHECKOUT: navigate to the cart page first. Once it's shown I will click 'Proceed "
+                    "to checkout' automatically — do NOT click payment options, 'Use this payment "
+                    "method', or 'Place your order' yourself.")
+            # No proceed control here yet -> let the reasoner navigate to the cart, then we take over.
+
         # DETERMINISTIC ADD-TO-CART (fix 2): on an add-to-cart subgoal, find + click the Add-to-Cart
         # control via the DOM the moment it's present on the page — the reasoner must NOT scroll-hunt
         # for it (the regression where it scrolled 4x and hit the loop hard-stop). After clicking,
@@ -374,6 +451,30 @@ async def run_subgoal(groq, session, reasoner_tools, subgoal, *, allowlist, appr
                           "condition": subgoal.get("success_condition", "")})
                     return "complete", f"added to cart ({signal})"
                 atc_confirm_polls += 1
+                # The add didn't register. The most common cause on fashion/footwear PDPs is an
+                # unselected REQUIRED size/variant — pick one (preferred size, else first in-stock) and
+                # retry the click ONCE before giving up (the asics/superkicks add-never-confirms bug).
+                # We do this only AFTER a clicked add failed, so we're definitely on a product page (no
+                # false positives from size FILTERS on a listing/category page).
+                if not variant_done:
+                    var = await select_required_variant(session, preferred_size)
+                    if var.get("ok"):
+                        variant_done = True
+                        recent_actions.append(
+                            f"selected required {var.get('kind', 'variant')} {var.get('selected')!r}; "
+                            f"retrying add to cart")
+                        emit({"type": "variant_selected", "kind": var.get("kind"),
+                              "selected": var.get("selected")})
+                        atc_clicked = False        # re-click add-to-cart now that a size is chosen
+                        atc_confirm_polls = 0
+                        await asyncio.sleep(0.5)   # let the variant's stock/button state update
+                        continue
+                    if var.get("kind") == "size":
+                        # A size is required but none is selectable (e.g. every size sold out) — a clear
+                        # dead end; escalate with the reason instead of blindly re-clicking.
+                        return "escalate", (f"can't add to cart — {var.get('reason', 'no size available')} "
+                                            f"for the selected product")
+                    variant_done = True            # 'none'/'already' — nothing to select; don't re-probe
                 if atc_confirm_polls >= 3:
                     return "escalate", ("clicked Add to Cart but the cart never confirmed — the add "
                                         "may have failed (sign-in / out of stock); do not retry blindly")
@@ -846,20 +947,32 @@ async def orchestrate(groq, session, reasoner_tools, capabilities, goal, *, allo
             # DOM-FIRST extraction: read structured rows straight from the live product grid
             # (agent/dom_extract) — deterministic, no LLM, no a11y-tree blindness (the Amazon
             # "0 candidates despite a full results page" bug). Scroll-to-reveal handles lazy grids.
-            cands = await extract_with_scroll(session, sg.get("explore_spec"))
-            page_url = ""
+            snapshot_text = ""
+            page_url = await current_url(session)
+            if is_search_engine(page_url):
+                # The agent ended on a SEARCH-ENGINE results page (e.g. it fell back to Google). Its
+                # "listings" are snippet junk, not buyable products — don't extract; force a re-plan
+                # onto a real retailer (the SERP-scrape bug). page-level guard for a11y rows that
+                # carry no per-row url/source for _drop_junk_candidates to key on.
+                cands = []
+                log.info("subgoal %s explore: on a search-engine page (%s) — skipping extraction",
+                         sg["id"], domain_of(page_url) or page_url)
+            else:
+                cands = _drop_junk_candidates(await extract_with_scroll(session, sg.get("explore_spec")))
             if cands:
                 log.info("subgoal %s explore -> %d candidates via DOM extractor", sg["id"], len(cands))
-            else:
+            elif not is_search_engine(page_url):
                 # Fall back to the LLM a11y extractor (FULL untruncated snapshot — products sit past
                 # observe()'s 12k cap), then the Readability/innerText salvage, only if the DOM
                 # reader found nothing (an unknown site whose grid the generic heuristic missed).
                 snapshot_text, page_url = await full_snapshot(session)
-                cands = await extract_candidates(groq, snapshot_text, sg.get("explore_spec"), model=model)
+                cands = _drop_junk_candidates(
+                    await extract_candidates(groq, snapshot_text, sg.get("explore_spec"), model=model))
                 if not cands and read_content and not page_looks_blocked(snapshot_text):
                     extra = await readable_text(session)
                     if extra:
-                        cands = await extract_candidates(groq, extra, sg.get("explore_spec"), model=model)
+                        cands = _drop_junk_candidates(
+                            await extract_candidates(groq, extra, sg.get("explore_spec"), model=model))
                 if cands:
                     log.info("subgoal %s explore -> %d candidates via a11y/text fallback",
                              sg["id"], len(cands))

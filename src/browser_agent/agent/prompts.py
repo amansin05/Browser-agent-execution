@@ -202,6 +202,16 @@ Rules:
 - When the goal already names a specific product/site to buy from (a follow-up like
   "buy the X from Y"), skip discovery: route straight to that source, add to cart, reuse the
   stored address/profile, apply any named offer, and stop at the payment page (secured).
+- BUY-FLOW STAGES (a purchase the user asked to COMPLETE): emit these as SEPARATE subgoals and STOP
+  at the payment page — explore -> exploit -> open the selected product & add to cart (success: cart
+  count increased) -> proceed to checkout (tier "secured", needs_approval). NEVER combine "add to
+  cart" with "proceed to checkout" in one subgoal: the cart must be confirmed non-empty BEFORE a
+  checkout step, or the checkout is gated and fails. The checkout subgoal's success_condition is
+  REACHING the checkout / payment-selection page — NOT "order placed". Do NOT emit a subgoal to
+  place/confirm the order, click "Place your order", or enter card/UPI/CVV details: placing the order
+  is the USER's secured action, not yours. A payment-method preference (e.g. Cash on Delivery) is just
+  noted on that final checkout subgoal — it is selected on the payment page, never a separate
+  place-order step.
 - Keep the plan short (5-10 subgoals). Each act/explore subgoal needs a success_condition.
 - DON'T OVER-DECOMPOSE. Do NOT emit separate subgoals for search / filter-by-X / sort — fold the
   search and any filtering/sorting INTO the single explore (gather) subgoal (state the constraints in

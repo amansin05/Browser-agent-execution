@@ -151,3 +151,43 @@ async def test_cart_confirmed_never_raises():
     sess = FakeSession([RuntimeError("eval down")])
     ok, _ = await dom_extract.cart_confirmed(sess)
     assert ok is False
+
+
+# ----------------------------------------------------------------- variant/size selection (this round)
+async def test_select_required_variant_maps_result():
+    # The in-page JS is faked; we test the wrapper passes the preferred size through and maps the dict.
+    sess = FakeSession([eval_result({"ok": True, "kind": "radio", "selected": "UK 9"})])
+    out = await dom_extract.select_required_variant(sess, preferred="9")
+    assert out == {"ok": True, "kind": "radio", "selected": "UK 9"}
+    fn = sess.calls[0][1]["function"]
+    assert '"9"' in fn                                   # the preferred size was inlined into the JS
+
+
+async def test_select_required_variant_none_and_never_raises():
+    sess = FakeSession([eval_result({"ok": False, "kind": "none"})])
+    assert await dom_extract.select_required_variant(sess) == {"ok": False, "kind": "none"}
+    # a tool error degrades to a safe no-op, never raises
+    sess2 = FakeSession([RuntimeError("eval down")])
+    assert await dom_extract.select_required_variant(sess2) == {"ok": False, "kind": "none"}
+
+
+# ----------------------------------------------------------------- deterministic checkout (this round)
+async def test_proceed_to_checkout_maps_result():
+    sess = FakeSession([eval_result({"ok": True, "text": "Proceed to checkout"})])
+    out = await dom_extract.proceed_to_checkout(sess)
+    assert out == {"ok": True, "text": "Proceed to checkout"}
+
+
+async def test_at_checkout_true_and_false():
+    sess = FakeSession([eval_result({"ok": True, "signal": "checkout url"})])
+    reached, signal = await dom_extract.at_checkout(sess)
+    assert reached is True and "checkout" in signal
+    sess2 = FakeSession([eval_result({"ok": False})])
+    reached2, _ = await dom_extract.at_checkout(sess2)
+    assert reached2 is False
+
+
+async def test_checkout_helpers_never_raise():
+    assert (await dom_extract.proceed_to_checkout(FakeSession([RuntimeError("x")]))).get("ok") is False
+    assert (await dom_extract.at_checkout(FakeSession([RuntimeError("x")])))[0] is False
+    assert (await dom_extract.select_cod(FakeSession([RuntimeError("x")]))).get("ok") is False

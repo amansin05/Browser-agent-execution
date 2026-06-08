@@ -26,6 +26,7 @@ from browser_agent.services.groq_service import make_groq_client
 from browser_agent.services.mcp_client import (
     open_session, parse_tabs, tool_result_to_text, wait_for_real_tab,
 )
+from browser_agent.utils.domains import is_search_engine
 from browser_agent.utils.io import cli_approve, cli_ask, maybe_await
 from browser_agent.utils.text import extract_json
 
@@ -338,7 +339,10 @@ class AgentSession:
         if not tabs:
             self._parked_tabs = []
             return []
-        self._parked_tabs = [url for _, url in tabs]
+        # Close every working tab, but only REMEMBER the real ones. A leftover search-engine (SERP)
+        # tab must not be reopened on a follow-up — resuming on a Google results page is what made the
+        # next task scrape the SERP as fake "products" (the SERP-scrape bug). Closed, just not parked.
+        self._parked_tabs = [url for _, url in tabs if not is_search_engine(url)]
         if self.memory:
             self.memory.note("parked tabs (reopened on a follow-up): "
                              + " | ".join(self._parked_tabs), key="parked_tabs")

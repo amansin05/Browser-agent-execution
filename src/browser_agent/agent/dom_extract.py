@@ -41,6 +41,11 @@ _EXTRACT_JS = r"""
 () => {
   const MAX = __MAX__;
   const host = location.hostname.replace(/^www\./, '');
+  // NEVER extract candidates off a search-engine results page: its result blocks look like priced
+  // cards to the generic reader below, so a SERP yields snippet junk (titles + numbers scraped from
+  // the snippet) with no buyable product URL (the SERP-scrape bug). Bail so the caller re-plans onto
+  // a real retailer. Mirrors the SKIP list in agent/grounding.py and utils/domains.is_search_engine.
+  if (/(^|\.)(google|bing|duckduckgo|yahoo|baidu|yandex|ecosia|startpage|ask|aol|qwant|brave)\./i.test(location.hostname)) return [];
   const clean = (s) => (s || '').replace(/\s+/g, ' ').trim();
   const numFrom = (s) => {
     if (s == null) return null;
@@ -167,6 +172,13 @@ _CART_COUNT_JS = r"""
 """
 
 
+async def current_url(session) -> str:
+    """The live page URL (a cheap `location.href` eval). '' if it can't be read. Never raises.
+    Used to detect when the agent has ended up on a search-engine results page before extracting."""
+    val = await evaluate_json(session, "() => location.href")
+    return val if isinstance(val, str) else ""
+
+
 async def cart_count(session) -> int | None:
     """Best-effort cart/bag item count: an int (0 = confirmed empty) or None if it can't be read.
     Used to confirm an item was actually added before navigating to checkout. Never raises."""
@@ -236,6 +248,212 @@ async def click_add_to_cart(session) -> dict:
     Returns {"ok": True, "text": <label>} or {"ok": False, "reason": ...}. Never raises."""
     val = await evaluate_json(session, _ADD_TO_CART_JS)
     return val if isinstance(val, dict) else {"ok": False, "reason": "add-to-cart eval failed"}
+
+
+# Select a REQUIRED size/variant on a product page so Add-to-Cart isn't blocked by an unselected
+# option (the asics/superkicks "clicked Add to Cart but it never confirmed" failure — Shopify and most
+# fashion/footwear PDPs refuse the add until a size is picked). Three patterns, in order: a size
+# <select>; size radio inputs (Shopify variant radios); or a swatch group of size-token buttons/links.
+# Picks `__PREF__` (a lowercased preferred size) when it matches an available option, else the first
+# IN-STOCK one; skips sold-out/disabled options. Returns {ok, kind, selected?/reason?}: ok=true when it
+# selected something; kind 'already' (a variant was already chosen — no-op), 'none' (no variant UI — a
+# single-variant product), or 'size' + reason (a size is required but none is available). Best-effort.
+_SELECT_VARIANT_JS = r"""
+() => {
+  const PREF = __PREF__;
+  const norm = (s) => (s == null ? '' : String(s)).replace(/\s+/g, ' ').trim();
+  const view = document.defaultView || window;
+  const visible = (el) => {
+    if (!el) return false;
+    let st = null; try { st = view.getComputedStyle(el); } catch (e) {}
+    if (st && (st.display === 'none' || st.visibility === 'hidden')) return false;
+    const r = el.getBoundingClientRect ? el.getBoundingClientRect() : { width: 1, height: 1 };
+    return !(r.width === 0 && r.height === 0 && !el.offsetParent);
+  };
+  const soldOut = (el) => {
+    if (!el) return false;
+    if (el.disabled || (el.getAttribute && el.getAttribute('aria-disabled') === 'true')) return true;
+    const cls = (typeof el.className === 'string' ? el.className : '').toLowerCase();
+    if (/sold[-\s]?out|unavailable|out[-\s]?of[-\s]?stock|\boos\b|is-disabled|disabled/.test(cls)) return true;
+    const t = norm(el.textContent || el.value).toLowerCase();
+    return /sold out|out of stock|notify me|coming soon/.test(t);
+  };
+  const SIZE_WORD = /\b(size|uk|us|eu|eur)\b/i;
+  const SIZE_TOKEN = /^(?:uk|us|eu|eur)?\s?\d{1,2}(?:\.\d)?$|^(?:xxs|xs|s|m|l|xl|xxl|xxxl)$/i;
+  const labelFor = (el) => {
+    if (el.labels && el.labels[0]) return norm(el.labels[0].textContent);
+    if (el.id) { const l = document.querySelector('label[for="' + (window.CSS && CSS.escape ? CSS.escape(el.id) : el.id) + '"]'); if (l) return norm(l.textContent); }
+    return norm(el.value);
+  };
+  const matchesPref = (txt) => PREF && norm(txt).toLowerCase().includes(PREF);
+
+  // ---- 1) a <select> for size / variant ----
+  for (const sel of document.querySelectorAll('select')) {
+    if (!visible(sel)) continue;
+    const tag = (sel.getAttribute('aria-label') || sel.name || sel.id || '').toLowerCase();
+    const opts = Array.from(sel.options || []);
+    const looksSize = SIZE_WORD.test(tag) || opts.some(o => SIZE_TOKEN.test(norm(o.textContent)));
+    if (!looksSize) continue;
+    const valid = (o) => o && o.value && !o.disabled && !/^(select|choose|pick|size|please)/i.test(norm(o.textContent));
+    const cur = sel.options[sel.selectedIndex];
+    if (cur && valid(cur) && norm(cur.textContent)) return { ok: false, kind: 'already', selected: norm(cur.textContent) };
+    const choices = opts.filter(valid);
+    if (!choices.length) return { ok: false, kind: 'size', reason: 'no selectable size options' };
+    let pick = PREF ? choices.find(o => matchesPref(o.textContent)) : null;
+    pick = pick || choices[0];
+    sel.value = pick.value;
+    sel.dispatchEvent(new Event('change', { bubbles: true }));
+    sel.dispatchEvent(new Event('input', { bubbles: true }));
+    return { ok: true, kind: 'select', selected: norm(pick.textContent) };
+  }
+
+  // ---- 2) size radio inputs (Shopify variant radios) ----
+  const radios = Array.from(document.querySelectorAll('input[type=radio]')).filter(visible);
+  const sizeRadios = radios.filter(r => {
+    const nm = (r.name || r.id || r.getAttribute('aria-label') || '').toLowerCase();
+    return SIZE_WORD.test(nm) || SIZE_TOKEN.test(labelFor(r));
+  });
+  if (sizeRadios.length) {
+    const already = sizeRadios.find(r => r.checked && !soldOut(r));
+    if (already) return { ok: false, kind: 'already', selected: labelFor(already) };
+    const avail = sizeRadios.filter(r => !soldOut(r) && !soldOut(r.labels && r.labels[0]));
+    if (!avail.length) return { ok: false, kind: 'size', reason: 'all sizes sold out' };
+    let pick = PREF ? avail.find(r => matchesPref(labelFor(r))) : null;
+    pick = pick || avail[0];
+    try { pick.checked = true; } catch (e) {}
+    const target = (pick.labels && pick.labels[0]) ? pick.labels[0] : pick;
+    target.click();
+    pick.dispatchEvent(new Event('change', { bubbles: true }));
+    return { ok: true, kind: 'radio', selected: labelFor(pick) };
+  }
+
+  // ---- 3) swatch buttons/links: a group of >=2 size-token clickables ----
+  const clickables = Array.from(document.querySelectorAll('button, a[role=button], [role=radio], li, label')).filter(visible);
+  const swatches = clickables.filter(el => { const t = norm(el.textContent); return t.length <= 6 && SIZE_TOKEN.test(t); });
+  if (swatches.length >= 2) {
+    const chosen = swatches.find(el => {
+      const cls = (typeof el.className === 'string' ? el.className : '').toLowerCase();
+      const on = (el.getAttribute && (el.getAttribute('aria-checked') === 'true' || el.getAttribute('aria-pressed') === 'true')) || /selected|active|is-active/.test(cls);
+      return on && !soldOut(el);
+    });
+    if (chosen) return { ok: false, kind: 'already', selected: norm(chosen.textContent) };
+    const avail = swatches.filter(el => !soldOut(el));
+    if (!avail.length) return { ok: false, kind: 'size', reason: 'all sizes sold out' };
+    let pick = PREF ? avail.find(el => matchesPref(el.textContent)) : null;
+    pick = pick || avail[0];
+    pick.click();
+    return { ok: true, kind: 'swatch', selected: norm(pick.textContent) };
+  }
+
+  return { ok: false, kind: 'none' };
+}
+"""
+
+
+async def select_required_variant(session, preferred: str | None = None) -> dict:
+    """Select a required size/variant on the current product page (in-page, no index) so Add-to-Cart
+    isn't blocked by an unselected option. Picks `preferred` when it matches an available option, else
+    the first in-stock one. Returns {ok, kind, selected?/reason?} — ok=True when a selection was made;
+    kind 'already' (already chosen), 'none' (single-variant product), or 'size'+reason (size required
+    but none available). Never raises."""
+    js = _SELECT_VARIANT_JS.replace("__PREF__", json.dumps((preferred or "").lower()[:20]))
+    val = await evaluate_json(session, js)
+    return val if isinstance(val, dict) else {"ok": False, "kind": "none"}
+
+
+# Click "Proceed to checkout" on the cart page (in-page, no index). Site-aware for Amazon's stable
+# control (input[name="proceedToCheckout"] / #sc-buy-box-ptc-button); generic otherwise. CRUCIALLY it
+# matches ONLY proceed/continue-to-checkout labels — never "Place your order" / "Buy now", which COMMIT
+# a purchase (the agent stops AT the payment page, the user places the order — orders are secured).
+_PROCEED_CHECKOUT_JS = r"""
+() => {
+  const SELS = ['input[name="proceedToCheckout"]', '#sc-buy-box-ptc-button input', '#sc-buy-box-ptc-button',
+                '#hlb-ptc-btn-native', 'input[name="proceedToRetailCheckout"]', '[name="proceedToALMCheckout"]',
+                '#sc-ptc-button', 'a#hlb-ptc-btn-native'];
+  let el = null;
+  for (const s of SELS) { el = document.querySelector(s); if (el) break; }
+  if (!el) {
+    for (const c of document.querySelectorAll('input[type=submit], button, a[role=button], a.a-button-text, a')) {
+      const t = (c.value || c.textContent || (c.getAttribute && c.getAttribute('aria-label')) || '').replace(/\s+/g, ' ').trim();
+      if (/^(proceed to (checkout|buy)|continue to checkout|go to checkout|checkout)$/i.test(t)) { el = c; break; }
+    }
+  }
+  if (!el) return { ok: false, reason: 'no proceed-to-checkout control on this page' };
+  try { el.scrollIntoView({ block: 'center' }); el.click();
+        return { ok: true, text: (el.value || el.textContent || 'Proceed to checkout').replace(/\s+/g, ' ').trim().slice(0, 40) };
+  } catch (e) { return { ok: false, reason: String(e) }; }
+}
+"""
+
+# Are we on the checkout / payment-selection / order-review page (NOT the cart)? Signals: a checkout
+# pipeline URL, a payment/place-order element, or page text asking to select a payment method / address.
+# Used so the checkout subgoal completes the moment the payment page is reached (the human's secured
+# step) instead of the reasoner looping on payment radios.
+_AT_CHECKOUT_JS = r"""
+() => {
+  const href = location.href;
+  if (/\/gp\/buy\/|\/checkout\/|\/spc\/|\/payments\b|buy\/spc|go-to-checkout|\/gp\/cart\/desktop\/go-to-checkout|alm.*checkout|proceedToCheckout/i.test(href))
+    return { ok: true, signal: 'checkout url' };
+  const MARK = ['#payment', '#paymentMethod', '#spc-orders', '#submitOrderButtonId', '#placeYourOrder',
+                '[name="placeYourOrder1"]', '#turbo-checkout-pyo-button', '#checkout-pyo-button',
+                '#puc-overlay', '#payment-information'];
+  for (const s of MARK) if (document.querySelector(s)) return { ok: true, signal: 'checkout element ' + s };
+  const body = (document.body ? document.body.innerText : '').toLowerCase();
+  if (/select a payment method|choose a payment method|how do you want to pay|place your order|delivery address|select a delivery address/.test(body))
+    return { ok: true, signal: 'checkout page text' };
+  return { ok: false };
+}
+"""
+
+# Best-effort: select Cash on Delivery on the payment page. Finds a COD radio/option (by value /
+# label / aria), selects it, and clicks a "Use this payment method" / "Continue" confirm if present.
+# It NEVER clicks "Place your order" — reaching the payment page is the success; COD pre-select is a
+# convenience the user asked for, not a commit. Returns {ok, reason?}. Never raises.
+_SELECT_COD_JS = r"""
+() => {
+  const isCOD = (t) => /cash on delivery|\bcod\b|cash\/on\/delivery|instrumentid=[^&]*cash/i.test((t || '').toLowerCase());
+  let el = null;
+  for (const c of document.querySelectorAll('input[type=radio], [role=radio], label, span, div, a')) {
+    const t = ((c.value || '') + ' ' + (c.textContent || '') + ' ' + ((c.getAttribute && (c.getAttribute('aria-label') || c.getAttribute('name'))) || ''));
+    if (isCOD(t)) {
+      el = (c.tagName === 'INPUT' || (c.getAttribute && c.getAttribute('role') === 'radio')) ? c
+           : ((c.querySelector && c.querySelector('input[type=radio],[role=radio]')) || c);
+      break;
+    }
+  }
+  if (!el) return { ok: false, reason: 'no Cash on Delivery option on this page' };
+  try { el.scrollIntoView({ block: 'center' }); if (el.tagName === 'INPUT') el.checked = true; el.click();
+        el.dispatchEvent(new Event('change', { bubbles: true })); } catch (e) {}
+  for (const c of document.querySelectorAll('input[type=submit], button, span.a-button-inner input, a[role=button]')) {
+    const t = (c.value || c.textContent || '').replace(/\s+/g, ' ').trim();
+    if (/^(use this payment method|continue|use this method)$/i.test(t)) { try { c.click(); } catch (e) {} break; }
+  }
+  return { ok: true };
+}
+"""
+
+
+async def proceed_to_checkout(session) -> dict:
+    """Click 'Proceed to checkout' on the cart page (in-page). Returns {"ok": True, "text": ...} or
+    {"ok": False, "reason": ...}. Never clicks an order-COMMIT button. Never raises."""
+    val = await evaluate_json(session, _PROCEED_CHECKOUT_JS)
+    return val if isinstance(val, dict) else {"ok": False, "reason": "proceed-to-checkout eval failed"}
+
+
+async def at_checkout(session) -> tuple[bool, str]:
+    """Is the current page the checkout / payment-selection / order-review page (not the cart)?
+    Returns (reached, signal). Best-effort — never raises."""
+    val = await evaluate_json(session, _AT_CHECKOUT_JS)
+    if isinstance(val, dict) and val.get("ok"):
+        return True, str(val.get("signal") or "checkout page")
+    return False, "not on the checkout/payment page yet"
+
+
+async def select_cod(session) -> dict:
+    """Best-effort select Cash on Delivery on the payment page (in-page). Returns {"ok": bool, ...}.
+    NEVER places the order. Never raises."""
+    val = await evaluate_json(session, _SELECT_COD_JS)
+    return val if isinstance(val, dict) else {"ok": False, "reason": "select-cod eval failed"}
 
 
 async def cart_confirmed(session, item_title: str | None = None) -> tuple[bool, str]:

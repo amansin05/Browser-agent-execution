@@ -54,13 +54,21 @@ def _explore_guidance(subgoal) -> str:
             f"to satisfy this on an unrelated page.")
     # Reaching the listings page efficiently is the hard part on retail sites: the reasoner tends to
     # click around the homepage/menus and get stuck instead of going straight to the grid. Steer it
-    # to the fastest route — a direct category/search URL, or the on-page search box — and away from
-    # re-clicking the same nav element (the "buy a phone" homepage-click failure).
+    # to the fastest route — the on-page search box, or a direct search-results URL — and away from
+    # re-clicking the same nav element (the "buy a phone" homepage-click failure). PREFER the search
+    # box over a guessed URL path, because search-URL patterns differ per site (Amazon's is /s?k=,
+    # NOT /search?q= — the wrong guess returned no results and the agent fell back to Google, whose
+    # results page is then scraped as fake "products"). Search-URL patterns we know are correct:
+    #   Amazon (amazon.in/.com): https://www.amazon.in/s?k=<query>      (NOT /search?q=)
+    #   Flipkart:                https://www.flipkart.com/search?q=<query>
     bits.append(
-        "To REACH the listings fast: use `navigate` to go DIRECTLY to a category or search-results "
-        "URL (e.g. https://site/mobiles or https://site/search?q=<your query>), OR `input_text` on "
-        "the search box's [index] with submit:true. Prefer this over clicking through menus, and "
-        "never repeat the same click — if a click does nothing, `navigate` to a URL instead.")
+        "To REACH the listings fast: PREFER `input_text` on the site's search box [index] with "
+        "submit:true (works on any site). Only use `navigate` to a search-results URL if you know "
+        "the site's exact pattern — Amazon is https://www.amazon.in/s?k=<query> (NOT /search?q=), "
+        "Flipkart is https://www.flipkart.com/search?q=<query>. Do NOT fall back to a general web "
+        "search engine (Google/Bing) to gather products — its results are not buyable listings; go "
+        "to the retailer itself. Never repeat the same click — if a click does nothing, navigate or "
+        "use the search box instead.")
     must = spec.get("must_have") or []
     if must:
         bits.append(f"Each candidate must meet: {', '.join(map(str, must))}.")

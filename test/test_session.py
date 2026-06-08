@@ -244,6 +244,19 @@ async def test_park_records_urls_and_closes_only_working_tabs():
     assert closes == [2, 1]
 
 
+async def test_park_closes_but_does_not_remember_search_engine_tab():
+    # A leftover Google results tab is closed like any working tab, but NOT parked — reopening a SERP
+    # on a follow-up is what made the next task scrape search results as fake products.
+    fake = FakeTabSession([("http://localhost:5173/", True),
+                           ("https://www.google.com/search?q=asics+under+6000", False),
+                           ("http://shop.com/a", False)])
+    s = _tab_session(fake, focus_url="http://localhost:5173/", use_extension=True)
+    parked = await s._park_working_tabs()
+    assert parked == ["http://shop.com/a"]                 # the SERP tab is not remembered
+    assert s._parked_tabs == ["http://shop.com/a"]
+    assert [t["url"] for t in fake.tabs] == ["http://localhost:5173/"]  # but it WAS closed
+
+
 async def test_restore_reopens_parked_tabs_and_clears():
     fake = FakeTabSession([("http://example.com/page", True)])
     s = _tab_session(fake, origin_tab=(0, "http://example.com/page"))

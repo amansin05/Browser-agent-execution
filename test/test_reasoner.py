@@ -665,14 +665,69 @@ async def test_add_to_cart_escalates_when_never_confirmed(monkeypatch):
     async def fake_cc(session, item_title=None):
         return (False, "no confirmation")
 
+    async def fake_variant(session, preferred=None):
+        return {"ok": False, "kind": "none"}              # a single-variant book — nothing to select
+
     monkeypatch.setattr(orch, "click_add_to_cart", fake_click)
     monkeypatch.setattr(orch, "cart_confirmed", fake_cc)
+    monkeypatch.setattr(orch, "select_required_variant", fake_variant)
     monkeypatch.setattr(orch.asyncio, "sleep", _noop_sleep)
     sg = {"goal": "Add the book to the cart", "success_condition": "item in cart", "type": "act"}
     status, detail = await run_subgoal(FakeGroq([]), FakeSession(dom=_dom_payload()), [], sg,
                                        allowlist=set(), approve=lambda p: True, ask=lambda q: "",
                                        observations=[], max_steps=8, read_content=False)
     assert status == "escalate" and "never confirmed" in detail
+
+
+async def test_add_to_cart_selects_size_then_confirms(monkeypatch):
+    # Footwear/fashion PDP: the first Add-to-Cart click doesn't register because no SIZE is selected.
+    # We pick a size (preferred from the goal, else first in-stock) and retry — then the cart confirms.
+    state = {"size_selected": False}
+
+    async def fake_click(session):
+        return {"ok": True, "text": "Add to Cart"}
+
+    async def fake_cc(session, item_title=None):
+        return (True, "cart badge 1") if state["size_selected"] else (False, "select a size")
+
+    async def fake_variant(session, preferred=None):
+        state["size_selected"] = True
+        return {"ok": True, "kind": "radio", "selected": f"UK {preferred or '8'}"}
+
+    events = []
+    monkeypatch.setattr(orch, "click_add_to_cart", fake_click)
+    monkeypatch.setattr(orch, "cart_confirmed", fake_cc)
+    monkeypatch.setattr(orch, "select_required_variant", fake_variant)
+    monkeypatch.setattr(orch.asyncio, "sleep", _noop_sleep)
+    sg = {"goal": "Add the Asics shoe to the cart, size 9", "success_condition": "item in cart", "type": "act"}
+    status, detail = await run_subgoal(FakeGroq([]), FakeSession(dom=_dom_payload()), [], sg,
+                                       allowlist=set(), approve=lambda p: True, ask=lambda q: "",
+                                       observations=[], max_steps=8, read_content=False, emit=events.append)
+    assert status == "complete" and "added to cart" in detail
+    # the size was selected and surfaced to the UI
+    assert any(e.get("type") == "variant_selected" for e in events)
+
+
+async def test_add_to_cart_escalates_when_all_sizes_sold_out(monkeypatch):
+    # A size is required but every size is sold out -> escalate with the reason, not a blind re-click.
+    async def fake_click(session):
+        return {"ok": True, "text": "Add to Cart"}
+
+    async def fake_cc(session, item_title=None):
+        return (False, "select a size")
+
+    async def fake_variant(session, preferred=None):
+        return {"ok": False, "kind": "size", "reason": "all sizes sold out"}
+
+    monkeypatch.setattr(orch, "click_add_to_cart", fake_click)
+    monkeypatch.setattr(orch, "cart_confirmed", fake_cc)
+    monkeypatch.setattr(orch, "select_required_variant", fake_variant)
+    monkeypatch.setattr(orch.asyncio, "sleep", _noop_sleep)
+    sg = {"goal": "Add the shoe to the cart", "success_condition": "item in cart", "type": "act"}
+    status, detail = await run_subgoal(FakeGroq([]), FakeSession(dom=_dom_payload()), [], sg,
+                                       allowlist=set(), approve=lambda p: True, ask=lambda q: "",
+                                       observations=[], max_steps=8, read_content=False)
+    assert status == "escalate" and "sold out" in detail
 
 
 async def test_add_to_cart_button_absent_falls_through_to_reasoner(monkeypatch):
@@ -701,10 +756,72 @@ async def test_add_to_cart_button_absent_falls_through_to_reasoner(monkeypatch):
     assert any("Do NOT navigate" in r for r in reasons)
 
 
-async def test_cart_stage_blocks_navigate_back_to_product():
-    # At checkout, navigating BACK to the selected product page is the post-add ping-pong. The
-    # cart-stage guard BLOCKS that navigate (never dispatched) and nudges; with the page thus pinned,
-    # the run escalates instead of bouncing product<->cart.
+async def test_checkout_reaches_payment_page_and_completes(monkeypatch):
+    # Deterministic checkout: on the cart page we click "Proceed to checkout"; once the payment page is
+    # reached the subgoal COMPLETES (the human's secured step) — the reasoner never drives the payment
+    # pipeline (the COD-selection loop). The reasoner must not be consulted here.
+    state = {"at": False}
+
+    async def fake_at(session):
+        return (state["at"], "checkout url")
+
+    async def fake_proceed(session):
+        state["at"] = True                              # the click lands us on the payment page
+        return {"ok": True, "text": "Proceed to checkout"}
+
+    monkeypatch.setattr(orch, "at_checkout", fake_at)
+    monkeypatch.setattr(orch, "proceed_to_checkout", fake_proceed)
+    monkeypatch.setattr(orch.asyncio, "sleep", _noop_sleep)
+    sg = {"goal": "Proceed to checkout", "success_condition": "payment page", "type": "act"}
+    groq = FakeGroq([])                                 # reasoner must never be called
+    status, detail = await run_subgoal(groq, FakeSession(dom=_dom_payload()), [], sg, allowlist=set(),
+                                       approve=lambda p: True, ask=lambda q: "", observations=[],
+                                       max_steps=6, read_content=False)
+    assert status == "complete" and "checkout" in detail
+    assert len(groq.calls) == 0                         # deterministic: the LLM reasoner was untouched
+
+
+async def test_checkout_selects_cod_when_requested(monkeypatch):
+    # When the goal asks for Cash on Delivery, we pre-select it (best-effort) on the payment page,
+    # then complete — but we NEVER place the order.
+    async def fake_at(session):
+        return (True, "checkout page text")             # already on the payment page
+
+    cod = {"called": False}
+
+    async def fake_cod(session):
+        cod["called"] = True
+        return {"ok": True}
+
+    monkeypatch.setattr(orch, "at_checkout", fake_at)
+    monkeypatch.setattr(orch, "select_cod", fake_cod)
+    monkeypatch.setattr(orch.asyncio, "sleep", _noop_sleep)
+    sg = {"goal": "Go to checkout and select cash on delivery", "success_condition": "COD selected",
+          "type": "act"}
+    events = []
+    status, detail = await run_subgoal(FakeGroq([]), FakeSession(dom=_dom_payload()), [], sg,
+                                       allowlist=set(), approve=lambda p: True, ask=lambda q: "",
+                                       observations=[], max_steps=4, read_content=False, emit=events.append)
+    assert status == "complete" and "Cash on Delivery" in detail
+    assert cod["called"] is True
+    assert any(e.get("type") == "cod_select" for e in events)
+
+
+async def test_cart_stage_blocks_navigate_back_to_product(monkeypatch):
+    # At the cart/checkout stage, navigating BACK to the selected product page is the post-add
+    # ping-pong. Here the deterministic checkout can't find a Proceed control (at_checkout False,
+    # proceed not-ok), so it falls through to the reasoner — which tries to navigate back to the
+    # product. The cart-stage guard BLOCKS that navigate (never dispatched) and nudges; with the page
+    # pinned, the run escalates instead of bouncing product<->cart.
+    async def fake_at(session):
+        return (False, "not yet")
+
+    async def fake_proceed(session):
+        return {"ok": False, "reason": "no proceed control"}
+
+    monkeypatch.setattr(orch, "at_checkout", fake_at)
+    monkeypatch.setattr(orch, "proceed_to_checkout", fake_proceed)
+    monkeypatch.setattr(orch.asyncio, "sleep", _noop_sleep)
     selected = {"name": "Think and Grow Rich", "url": "https://www.amazon.in/dp/9389931525"}
     sg = {"goal": "Proceed to checkout", "success_condition": "payment page", "type": "act"}
     events = []

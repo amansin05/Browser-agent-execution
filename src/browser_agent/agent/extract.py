@@ -18,6 +18,39 @@ _GOAL_STOP = {"buy", "order", "get", "find", "me", "a", "an", "the", "and", "or"
 _BUNDLE_MARKERS = ("set of", "pack of", "combo", "bundle", "(set", "books)", "2 books", "3 books",
                    "4 books", "collection of")
 
+# A spending ceiling stated in the goal — "under 6000", "below ₹5999", "less than 5000", "within
+# 6000", "upto 6000", "budget of 6000", "< 5000", "max 6000". We drop candidates priced over it
+# BEFORE ranking so "under 6000" actually means under 6000 (the scorer otherwise only down-weights
+# price, letting an over-budget item still win).
+_CEILING_RE = re.compile(
+    r"(?:under|below|less than|cheaper than|within|up\s?to|upto|max(?:imum)?|budget(?:\s+of)?|<=?|≤)"
+    r"\s*(?:rs\.?|inr|₹|\$|usd|eur|€|gbp|£)?\s*([\d][\d,]*(?:\.\d+)?)", re.I)
+
+
+def _price_ceiling(goal: str):
+    """The numeric spending ceiling stated in `goal` (e.g. 6000 for 'asics under ₹6000'), or None."""
+    m = _CEILING_RE.search(goal or "")
+    if not m:
+        return None
+    try:
+        return float(m.group(1).replace(",", ""))
+    except ValueError:
+        return None
+
+
+def _price_num(price):
+    """Parse a price string/number to a float, ignoring currency symbols + thousands separators
+    (e.g. '₹6,000' -> 6000.0, 'Rs.5,499' -> 5499.0). None when no number is present."""
+    if price is None or price == "":
+        return None
+    m = re.search(r"\d[\d,]*(?:\.\d+)?", str(price))
+    if not m:
+        return None
+    try:
+        return float(m.group(0).replace(",", ""))
+    except ValueError:
+        return None
+
 
 def _goal_terms(goal: str) -> list[str]:
     return [w for w in re.findall(r"[a-z0-9]+", (goal or "").lower())
@@ -46,7 +79,17 @@ def relevance_filter(goal: str, candidates: list[dict]) -> list[dict]:
         no_bundle = [c for c in kept if not any(b in _name(c) for b in _BUNDLE_MARKERS)]
         kept = no_bundle or kept
     priced = [c for c in kept if c.get("price") not in (None, "")]
-    return priced or kept
+    pool = priced or kept
+    # Budget ceiling from the goal ("under ₹6000"): drop priced candidates ABOVE it. Unpriced rows
+    # pass (price unknown, not "over budget"). Falls back to the full pool if this would empty it.
+    ceiling = _price_ceiling(goal)
+    if ceiling is not None:
+        within = [c for c in pool
+                  if _price_num(c.get("price")) is None or _price_num(c.get("price")) <= ceiling]
+        if len(within) != len(pool):
+            log.debug("budget filter (<= %.0f): %d -> %d candidates", ceiling, len(pool), len(within))
+        pool = within or pool
+    return pool
 
 
 async def _chat_json(groq, system, user, *, model, max_completion_tokens, attempts=3):

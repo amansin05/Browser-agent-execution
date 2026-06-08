@@ -405,6 +405,61 @@ def test_finalize_candidates_resolves_and_flags():
     assert out[3]["url"] is None                                    # malformed (dotless host) rejected
 
 
+def test_size_hint_parsing():
+    assert orch._size_hint("Add the Asics shoe to the cart, size 9") == "9"
+    assert orch._size_hint("buy uk 8 trainers") == "8"
+    assert orch._size_hint("get me a medium tee, size: M") == "M"
+    assert orch._size_hint("eu 42 boots") == "42"
+    assert orch._size_hint("Open https://shop/dp/B09ABC123 and add to cart") is None   # ASIN digits != size
+
+
+def test_drop_junk_candidates_removes_search_engine_rows():
+    cands = [
+        {"name": "Real shoe", "url": "https://www.superkicks.in/products/asics-gel", "source": "superkicks.in"},
+        {"name": "Up To ₹6000 - Asics ...Amazon.in", "url": "https://www.google.com/search?q=asics",
+         "source": "google.com"},                                          # SERP result block
+        {"name": "store rating", "price": "₹7,999", "source": "google.com"},  # SERP snippet, no real url
+        {"name": "No-url retailer row", "url": None, "source": "myntra.com"},  # url-less but real source
+    ]
+    out = orch._drop_junk_candidates(cands)
+    names = [c["name"] for c in out]
+    assert "Real shoe" in names
+    assert "No-url retailer row" in names                  # real retailer kept even without a url
+    assert not any("google" in (c.get("source") or "") for c in out)   # both google rows dropped
+    assert len(out) == 2
+
+
+async def test_orchestrate_skips_extraction_on_search_engine_page(monkeypatch):
+    # The reasoner ended on a Google results page. We must NOT scrape it as products — with no other
+    # candidates the explore re-plans onto a real source (instead of presenting SERP junk).
+    async def fake_plan(*a, **k):
+        return [_explore(), _present()]
+
+    async def fake_run(*a, **k):
+        return ("complete", "ok")
+
+    async def fake_dom(session, spec=None, **k):
+        raise AssertionError("must not extract from a search-engine page")
+
+    monkeypatch.setattr(orch, "plan_subgoals", fake_plan)
+    monkeypatch.setattr(orch, "run_subgoal", fake_run)
+    monkeypatch.setattr(orch, "current_url", lambda s: _async("https://www.google.com/search?q=asics"))
+    monkeypatch.setattr(orch, "extract_with_scroll", fake_dom)   # asserts it is never reached
+    monkeypatch.setattr(orch, "extract_candidates", fake_dom)
+
+    # Only one source -> when it yields nothing and there are no candidates, the re-plan budget is
+    # spent and we get a Failed result naming the dead source. The key assertion is no scrape happened.
+    result = await _orchestrate(max_replans=0)
+    assert result.startswith("Failed:")
+    assert "google.com" in result
+
+
+def _async(value):
+    async def _coro():
+        return value
+    return _coro()
+
+
 def test_selected_note_carries_url_and_title():
     note = orch._selected_note({"name": "Think and Grow Rich",
                                 "url": "https://www.amazon.in/dp/9389931525", "price": "₹139"})
