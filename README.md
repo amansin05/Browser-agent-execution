@@ -19,13 +19,17 @@ is needing Node.js and writing our own MCP client so Scout stays the brain (`sco
 
 ## Architecture (Path B)
 
-**The whole system at a glance** — you type a task; the orchestrator runs plan → reason → verify
-→ re-plan on the Groq brain (split by role); the Playwright MCP server *perceives* and *actuates*
-your live Chrome; and local SQLite holds memory, session state, and a replayable per-run trace.
-Safety runs throughout: risky steps pause for your approval and a domain allowlist blocks
-off-limits sites.
+**The whole system at a glance** — follow one task top to bottom: you type it; the chat UI streams
+it over a WebSocket to the session coordinator, which sequences the stages. The **plan stage**
+grounds the goal and the planner (`qwen3`) builds an ordered subgoal list, reading a preamble from
+local SQLite memory (profile + run state). Each subgoal runs an **observe → decide → act** loop —
+perceive the page (DOM / a11y / extractor), the reasoner (Scout) picks one action, Playwright MCP
+runs it against your live Chrome — and an independent **verifier** checks it: pass advances to the
+next subgoal, fail hands the failure context back to the planner to **re-plan**. When every subgoal
+passes, the **scorer** (pure code) ranks candidates and the **composer** (`gpt-oss`) writes the
+final answer, which streams back to you.
 
-![Browser Agent — the whole system at a glance](docs/browser-agent-end-to-end-flow.svg)
+![Browser Agent — data flow from task to answer](docs/system-at-a-glance.svg)
 
 The same stack seen as **five layers** — chat UI, orchestrator + brain, the hands (Playwright
 MCP), your browser, and memory:
